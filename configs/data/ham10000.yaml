@@ -1,0 +1,19 @@
+data:
+  dataset_name: ham10000
+  metadata_csv: data/raw/metadata/HAM10000_metadata.csv
+  image_dir: data/raw/images
+  image_size: 380
+  num_workers: 0  # 0 avoids DataLoader fork hang on macOS; use 4+ on Linux
+  pin_memory: true
+  test_size: 0.15
+  n_folds: 5
+  split_seed: 42
+  # Use train+val for training; split by lesion_id into train/val (no test used for training)
+  use_all_data: true
+  val_fraction: 0.15
+  # After running scripts/preprocess_data.py, set use_preprocessed: true for faster training
+  use_preprocessed: false
+  preprocessed_image_dir: data/preprocessed/images
+  # Set false to skip opening every image at startup (faster; use when data is trusted)
+  validate_images_on_init: false
+

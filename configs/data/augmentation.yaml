@@ -1,0 +1,11 @@
+augmentation:
+  train:
+    random_resized_crop: true
+    horizontal_flip_prob: 0.5
+    vertical_flip_prob: 0.5
+    random_rotate_90_prob: 0.5
+    color_jitter_prob: 0.5
+  val:
+    resize_only: true
+    normalize_only: true
+

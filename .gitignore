@@ -1,5 +1,5 @@
-# Data and outputs (do not commit)
-data/
+# Data and outputs (do not commit) — only root-level data/ (images), not src/data/ (code)
+/data/
 outputs/
 wandb/
 flagged/
