@@ -1,0 +1,7 @@
+model:
+  backbone: efficientnet_b4
+  pretrained: true
+  use_metadata: false
+  fusion: late
+  num_classes: 7
+

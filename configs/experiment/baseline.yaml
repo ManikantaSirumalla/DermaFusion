@@ -1,0 +1,6 @@
+experiment:
+  name: baseline
+  use_tta: false
+  wandb_project: skin-cancer-multimodal
+  notes: image-only efficientnet baseline
+

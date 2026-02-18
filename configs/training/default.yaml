@@ -1,0 +1,28 @@
+# Aligned with Skin Cancer Capstone Complete Guide (Feb 2026)
+# device: null = auto (cuda > mps > cpu). Set to "cpu" to avoid MPS hangs on macOS.
+training:
+  device: null
+  batch_size: 32
+  epochs: 100
+  early_stopping_patience: 15
+  sanity_check: false  # set true to overfit 1 batch and verify pipeline
+  mixed_precision: true
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 4  # effective batch 128 (guide: 32 x 4)
+  optimizer:
+    name: adamw
+    lr: 0.0001   # backbone (guide: 1e-4)
+    head_lr: 0.001  # head (guide: 1e-3)
+    weight_decay: 0.0001  # guide: 1e-4
+  scheduler:
+    name: cosine_annealing_warmup  # or cosine_warm_restarts (T_0=10, T_mult=2)
+    warmup_epochs: 5
+    min_lr: 0.000001
+    # for cosine_warm_restarts: T_0=10, T_mult=2
+  loss:
+    name: focal
+    gamma: 2.0
+    alpha: class_frequency_inverse
+    melanoma_fn_weight: 10  # guide: melanoma FN = 10x cost
+    bcc_fn_weight: 5        # guide: BCC FN = 5x cost
+

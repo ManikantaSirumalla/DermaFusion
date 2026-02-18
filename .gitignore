@@ -1,0 +1,37 @@
+# Data and outputs (do not commit)
+data/
+Datasets/
+outputs/
+wandb/
+flagged/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv311/
+.pytest_cache/
+*.egg-info/
+.eggs/
+
+# Secrets and checkpoints
+.env
+*.ckpt
+*.pth
+
+# Cursor rules and internal docs (keep README.md tracked)
+.cursor/
+*.mdc
+docs/
+IMPLEMENTATION_FLOW.md
+APP_STORE_CONNECT_SUBMISSION.md
+app_store_screenshot_captions.md
+project_documentation.md
+model_card.md
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo

@@ -1,0 +1,6 @@
+experiment:
+  name: multimodal_film
+  use_tta: false
+  wandb_project: skin-cancer-multimodal
+  notes: multimodal FiLM fusion experiment
+

@@ -1,0 +1,20 @@
+training:
+  batch_size: 32
+  epochs: 20
+  early_stopping_patience: 6
+  mixed_precision: true
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  optimizer:
+    name: adamw
+    lr: 0.00003
+    head_lr: 0.0003
+    weight_decay: 0.01
+  scheduler:
+    name: cosine_annealing_warmup
+    warmup_epochs: 2
+    min_lr: 0.000001
+  loss:
+    name: cost_sensitive
+    melanoma_fn_weight: 5.0
+

@@ -1,0 +1,100 @@
+# DermaFusion Body Model Materials
+# Default: neutral medical gray for all regions
+# App dynamically changes Kd at runtime for highlighting
+
+newmtl mat_region_scalp
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_face
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_ear
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_neck
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_chest
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_abdomen
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_back
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_upper_extremity
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_hand
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_lower_extremity
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_foot
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+
+newmtl mat_region_genital
+Ka 0.15 0.15 0.16
+Kd 0.78 0.78 0.80
+Ks 0.20 0.20 0.20
+Ns 30.0
+d 1.0
+illum 2
+

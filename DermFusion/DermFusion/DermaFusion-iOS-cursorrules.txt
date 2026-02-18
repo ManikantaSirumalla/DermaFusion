@@ -1,0 +1,1524 @@
+# ════════════════════════════════════════════════════════════════
+# CURSOR AI RULES — DermaFusion iOS App
+# ════════════════════════════════════════════════════════════════
+# Project: DermaFusion — On-Device Multi-Modal Skin Cancer Detection
+# Platform: iOS 17+ / iPhone 12+ (Neural Engine required)
+# Stack: SwiftUI, CoreML, Vision, Swift Charts, SwiftData
+# Language: Swift 5.9+, strict concurrency enabled
+# Design Reference: DermaFusion_iOS_Design_Doc.md
+# Related: ML pipeline in ../skin-cancer-multimodal/
+# ════════════════════════════════════════════════════════════════
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 1: PROJECT IDENTITY & MEDICAL CONTEXT
+# ────────────────────────────────────────────────────────────────
+
+You are building a medical-context iOS application that runs a multi-modal deep
+learning model entirely on-device to classify skin lesions from dermoscopic images
+and clinical metadata (age, sex, lesion location). This is a professional portfolio
+project that must demonstrate production-grade iOS engineering and responsible
+deployment of medical AI.
+
+CRITICAL CONTEXT — THIS IS A HEALTH-ADJACENT APP:
+- Every screen that shows results MUST include a medical disclaimer
+- Never use language that implies diagnosis ("you have...", "this is...")
+- Always use hedging language ("suggests", "indicates", "consistent with")
+- The app is categorized as EDUCATION, not MEDICAL
+- Zero health data ever leaves the device — enforce this absolutely
+- No analytics, no crash reporting that captures images, no network calls with health data
+
+The model classifies lesions into 7 categories:
+- Melanoma (mel) — highest clinical priority, missed detection is life-threatening
+- Melanocytic nevi (nv) — most common, benign
+- Basal cell carcinoma (bcc) — malignant, slow-growing
+- Actinic keratoses (akiec) — pre-cancerous
+- Benign keratosis (bkl) — benign
+- Dermatofibroma (df) — benign, rare in dataset
+- Vascular lesions (vasc) — benign, rarest class
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 2: ARCHITECTURE & PROJECT STRUCTURE
+# ────────────────────────────────────────────────────────────────
+
+Follow MVVM (Model-View-ViewModel) architecture strictly. Every view that contains
+business logic must have a corresponding ViewModel. Views are dumb — they render
+state and forward user actions. ViewModels own state, call services, and expose
+published properties.
+
+```
+DermaFusion-iOS/
+├── DermaFusion/
+│   ├── App/
+│   │   ├── DermaFusionApp.swift              # @main entry point, dependency injection root
+│   │   └── ContentView.swift                  # Tab-based root navigation (Scan, History, Learn, About)
+│   │
+│   ├── Core/
+│   │   ├── DesignSystem/
+│   │   │   ├── DFDesignSystem.swift           # ★ UNIFIED design token hub (see Section 4)
+│   │   │   ├── DFColors.swift                 # All color definitions, semantic + risk + surface
+│   │   │   ├── DFTypography.swift             # All font styles, Dynamic Type scaled
+│   │   │   ├── DFSpacing.swift                # Spacing scale, padding, margins, radii
+│   │   │   ├── DFShadows.swift                # Elevation / shadow definitions
+│   │   │   └── DFIcons.swift                  # SF Symbol name constants + custom icon refs
+│   │   │
+│   │   ├── Components/
+│   │   │   ├── DFButton.swift                 # Primary, secondary, destructive button styles
+│   │   │   ├── DFCard.swift                   # Reusable card container (surface + shadow + radius)
+│   │   │   ├── DFBanner.swift                 # Info, warning, disclaimer banners
+│   │   │   ├── DFRiskBadge.swift              # Green/yellow/red risk pill with icon
+│   │   │   ├── DFLoadingIndicator.swift       # Branded loading animation
+│   │   │   ├── DFSegmentedControl.swift       # Styled segmented picker
+│   │   │   ├── DFSlider.swift                 # Styled slider with numeric readout
+│   │   │   └── DFEmptyState.swift             # Empty state placeholder (icon + message + CTA)
+│   │   │
+│   │   ├── Extensions/
+│   │   │   ├── CGImage+Preprocessing.swift    # Shades of Gray, resize, center crop
+│   │   │   ├── UIImage+Utilities.swift        # Orientation fix, JPEG compression, thumbnail
+│   │   │   ├── Color+Hex.swift                # Init Color from hex string
+│   │   │   ├── View+Accessibility.swift       # VoiceOver helper modifiers
+│   │   │   ├── Date+Formatting.swift          # Relative and absolute date strings
+│   │   │   └── Array+Safe.swift               # Safe subscript (returns nil, never crashes)
+│   │   │
+│   │   └── Errors/
+│   │       └── DFError.swift                  # Unified error enum (see Section 8)
+│   │
+│   ├── Models/
+│   │   ├── DiagnosisResult.swift              # Prediction output: probabilities, risk level, metadata
+│   │   ├── LesionCategory.swift               # Enum for 7 diagnostic classes + display properties
+│   │   ├── RiskLevel.swift                    # Enum: low, moderate, high + thresholds + colors
+│   │   ├── BodyRegion.swift                   # Enum for 12 anatomical regions from HAM10000
+│   │   ├── ScanRecord.swift                   # SwiftData @Model for persistence
+│   │   ├── MetadataInput.swift                # Struct: age, sex, body region (user's input)
+│   │   └── Sex.swift                          # Enum: male, female, unspecified + model encoding
+│   │
+│   ├── Services/
+│   │   ├── ModelService.swift                 # CoreML inference (classification + GradCAM)
+│   │   ├── ImagePreprocessor.swift            # Full preprocessing pipeline (crop → constancy → resize)
+│   │   ├── GradCAMService.swift               # GradCAM heatmap generation and overlay compositing
+│   │   ├── PersistenceService.swift           # SwiftData CRUD operations for ScanRecord
+│   │   └── PDFExportService.swift             # Generate shareable PDF report
+│   │
+│   ├── ViewModels/
+│   │   ├── ScanViewModel.swift                # Orchestrates capture → preprocess → infer → result
+│   │   ├── BodyMapViewModel.swift             # Region selection, front/back toggle
+│   │   ├── MetadataInputViewModel.swift       # Validates and encodes age, sex, region
+│   │   ├── ResultsViewModel.swift             # Formats results, GradCAM toggle, save/export actions
+│   │   ├── HistoryViewModel.swift             # Loads, deletes scan records, empty state
+│   │   └── EducationViewModel.swift           # Loads educational content from JSON
+│   │
+│   ├── Views/
+│   │   ├── Launch/
+│   │   │   └── DisclaimerView.swift            # Full-screen first-launch disclaimer
+│   │   ├── Tab1_Scan/
+│   │   │   ├── ScanHomeView.swift              # Landing: New Scan + Library + last scan card
+│   │   │   ├── CameraCaptureView.swift         # AVFoundation camera + circular overlay guide
+│   │   │   ├── ImageReviewView.swift           # Pinch-to-zoom review + retake/confirm
+│   │   │   ├── MetadataInputView.swift         # Age, sex, location row (pushes to body map)
+│   │   │   ├── BodyMapView.swift               # Separate pushed screen: interactive body silhouette
+│   │   │   ├── AnalysisView.swift              # Loading animation (1.2s minimum display)
+│   │   │   └── ResultsView.swift               # Full results: image + GradCAM + chart + risk + actions
+│   │   ├── Tab2_History/
+│   │   │   ├── HistoryListView.swift           # Chronological list + swipe-to-delete + empty state
+│   │   │   └── ScanDetailView.swift            # Full detail + notes + export + delete
+│   │   ├── Tab3_Learn/
+│   │   │   ├── LearnView.swift                 # Hub: ABCDE card + lesion type grid + dermoscopy card
+│   │   │   ├── ABCDERuleView.swift             # 5 warning signs with illustrations
+│   │   │   ├── LesionTypeDetailView.swift      # Per-category education + examples
+│   │   │   └── DermoscopyBasicsView.swift       # What is dermoscopy, how AI uses it
+│   │   ├── Tab4_About/
+│   │   │   └── AboutView.swift                 # Model info, disclaimer, privacy, credits, data mgmt
+│   │   └── SharedComponents/
+│   │       ├── ProbabilityChartView.swift       # Horizontal bar chart (Swift Charts)
+│   │       └── GradCAMOverlayView.swift         # Image with toggleable heatmap overlay
+│   │
+│   └── Resources/
+│       ├── Assets.xcassets                    # App icons, color sets (light+dark), body map assets
+│       ├── DermaFusion.mlpackage              # CoreML classification model
+│       ├── DermaFusionGradCAM.mlpackage       # CoreML GradCAM model
+│       ├── EducationalContent.json            # Lesion descriptions, ABCDE content (localizable)
+│       └── Education/                          # Example images per lesion category
+│
+├── DermaFusionTests/
+│   ├── Services/
+│   │   ├── ImagePreprocessorTests.swift       # Parity tests against Python preprocessing output
+│   │   ├── ModelServiceTests.swift            # Inference output matches PyTorch reference
+│   │   └── MetadataEncodingTests.swift        # Encoding indices match training pipeline exactly
+│   ├── ViewModels/
+│   │   ├── ScanViewModelTests.swift           # State transitions, error handling, happy path
+│   │   ├── HistoryViewModelTests.swift        # CRUD, empty state, delete
+│   │   └── ResultsViewModelTests.swift        # Risk calculation, formatting, save
+│   └── Models/
+│       ├── RiskLevelTests.swift               # Threshold boundary tests
+│       └── LesionCategoryTests.swift          # Display name, model index mapping
+│
+├── DermaFusionUITests/
+│   ├── DisclaimerFlowUITests.swift            # First-launch disclaimer cannot be bypassed
+│   └── ScanFlowUITests.swift                  # Full capture → result flow
+│
+└── Scripts/
+    ├── convert_to_coreml.py                   # PyTorch → CoreML conversion
+    ├── validate_coreml.py                     # Compare CoreML vs PyTorch outputs
+    └── export_gradcam_model.py                # Export GradCAM CoreML model
+```
+
+FILE NAMING CONVENTIONS:
+- All design system files: prefix `DF` (DermaFusion namespace)
+- All reusable components: prefix `DF`
+- Views: suffix `View` (ResultsView, not Results)
+- ViewModels: suffix `ViewModel` (ResultsViewModel)
+- Services: suffix `Service` (ModelService)
+- Tests: suffix `Tests` (ModelServiceTests)
+- Extensions: `TypeName+Capability.swift` (CGImage+Preprocessing.swift)
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 3: DOCUMENTATION & COMMENTING STANDARDS
+# ────────────────────────────────────────────────────────────────
+
+Every file, type, method, and non-trivial property MUST have documentation that
+another developer (or a hiring manager reviewing the code) can understand without
+asking you questions. This is non-negotiable.
+
+FILE HEADERS — Every .swift file starts with:
+```swift
+//
+//  ModelService.swift
+//  DermaFusion
+//
+//  Handles CoreML model loading and inference for skin lesion classification.
+//  Accepts a preprocessed image (CVPixelBuffer) and encoded metadata (MLMultiArray),
+//  runs the DermaFusion.mlpackage model on the Neural Engine, and returns a
+//  DiagnosisResult containing class probabilities and risk assessment.
+//
+//  Threading: All inference runs on a dedicated background queue to avoid blocking
+//  the main thread. Results are published back on @MainActor.
+//
+//  Dependencies: CoreML, Vision, ImagePreprocessor, DiagnosisResult
+//
+//  Created by [Your Name] on [Date].
+//
+```
+
+TYPE DOCUMENTATION — Every struct, class, enum, protocol:
+```swift
+/// Represents the output of a single skin lesion classification inference.
+///
+/// Contains the probability distribution across all 7 diagnostic categories,
+/// the computed risk level based on malignancy thresholds, and a reference
+/// to the input metadata used during prediction.
+///
+/// ## Usage
+/// ```swift
+/// let result = try await modelService.classify(image: buffer, metadata: encoded)
+/// print(result.primaryDiagnosis.displayName)    // "Melanocytic Nevi"
+/// print(result.riskLevel)                       // .low
+/// print(result.probability(for: .melanoma))     // 0.03
+/// ```
+///
+/// ## Thread Safety
+/// This struct is `Sendable` and can be safely passed across concurrency boundaries.
+///
+/// - Note: Probabilities are softmax-normalized and sum to 1.0 (within floating-point tolerance).
+/// - SeeAlso: ``ModelService/classify(image:metadata:)``
+struct DiagnosisResult: Sendable, Identifiable { ... }
+```
+
+METHOD DOCUMENTATION — Every public/internal method:
+```swift
+/// Runs the DermaFusion CoreML model on the provided image and metadata inputs.
+///
+/// This method performs the following steps:
+/// 1. Validates that the pixel buffer dimensions match the model's expected input (380×380)
+/// 2. Constructs the model's multi-input prediction request
+/// 3. Executes inference on the Neural Engine (falls back to GPU → CPU)
+/// 4. Applies softmax to raw logits to produce calibrated probabilities
+/// 5. Computes the risk level based on malignancy probability thresholds
+///
+/// - Parameters:
+///   - image: A `CVPixelBuffer` in RGB format, sized 380×380, with Shades of Gray
+///     color constancy already applied. Must match the preprocessing used during training.
+///   - metadata: An `MLMultiArray` containing encoded clinical metadata in the exact order
+///     expected by the model: [normalized_age, age_missing_flag, sex_index, ...location_index].
+///
+/// - Returns: A ``DiagnosisResult`` containing per-class probabilities and risk assessment.
+///
+/// - Throws:
+///   - ``DFError.modelNotLoaded`` if the CoreML model failed to initialize at app launch.
+///   - ``DFError.invalidInputDimensions`` if the pixel buffer is not 380×380.
+///   - ``DFError.inferenceFailed(underlying:)`` if CoreML prediction throws.
+///
+/// - Important: This method must NOT be called from the main thread. Use `await` from
+///   an async context or dispatch to `inferenceQueue`.
+///
+/// - Complexity: O(1) for inference (~50-100ms on Neural Engine).
+func classify(image: CVPixelBuffer, metadata: MLMultiArray) async throws -> DiagnosisResult
+```
+
+INLINE COMMENTS — Use for WHY, not WHAT:
+```swift
+// GOOD: Explains WHY
+// Clamp age to [0, 100] before normalization because the training pipeline
+// used min-max scaling with these bounds. Out-of-range values would produce
+// metadata tensor values the model has never seen, degrading predictions.
+let clampedAge = min(max(age, 0), 100)
+
+// GOOD: Explains a non-obvious clinical decision
+// Threshold is 0.30 (30%) for high-risk classification because clinical studies
+// show melanoma sensitivity above 95% at this cutoff while maintaining acceptable
+// specificity. See: Esteva et al., Nature 2017.
+static let highRiskThreshold: Float = 0.30
+
+// BAD: Restates the code
+// Divide age by 100
+let normalizedAge = Float(age) / 100.0
+```
+
+MARK ANNOTATIONS — Organize every file with MARK sections:
+```swift
+// MARK: - Properties
+// MARK: - Initialization
+// MARK: - Public API
+// MARK: - Private Helpers
+// MARK: - Edge Case Handling
+// MARK: - Accessibility
+```
+
+WARNING/FIXME/TODO — Use structured tags for trackable items:
+```swift
+// TODO: (P1) Add INT8 quantization option for older devices — reduces model size ~4x
+// FIXME: GradCAM overlay alpha blending produces banding on iPhone 12 Mini display
+// WARNING: Changing metadata encoding order here MUST be mirrored in convert_to_coreml.py
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 4: UNIFIED DESIGN SYSTEM — DFDesignSystem
+# ────────────────────────────────────────────────────────────────
+
+ALL visual properties — colors, fonts, spacing, shadows, radii, icons — MUST be
+accessed through the centralized design system. NEVER use hardcoded values in views.
+This ensures visual consistency, simplifies theming, and makes design changes
+propagate everywhere from a single source of truth.
+
+### DFDesignSystem.swift — The Hub
+```swift
+/// Centralized access point for all DermaFusion design tokens.
+///
+/// All UI components reference this namespace instead of using hardcoded colors,
+/// fonts, or spacing. This enables consistent theming, dark mode support, and
+/// accessibility compliance from a single source of truth.
+///
+/// ## Usage
+/// ```swift
+/// Text("Results")
+///     .font(DFDesignSystem.Typography.headline)
+///     .foregroundStyle(DFDesignSystem.Colors.textPrimary)
+///     .padding(DFDesignSystem.Spacing.md)
+/// ```
+///
+/// ## Architecture Decision
+/// Design tokens are organized as nested enums under a single namespace rather than
+/// scattered across the codebase. This mirrors design systems used at companies like
+/// Airbnb (DLS), Uber (Base), and Apple (Human Interface tokens), making the codebase
+/// familiar to any iOS engineer who has worked at scale.
+enum DFDesignSystem {
+    typealias Colors = DFColors
+    typealias Typography = DFTypography
+    typealias Spacing = DFSpacing
+    typealias Shadows = DFShadows
+    typealias Icons = DFIcons
+}
+```
+
+### DFColors.swift — Complete Color Palette
+```swift
+/// All color definitions for DermaFusion.
+///
+/// Colors are organized into semantic categories. Every color has both light and
+/// dark mode variants defined in Assets.xcassets and referenced by name here.
+/// Risk-related colors use Apple's system palette for HIG compliance and
+/// guaranteed accessibility contrast ratios.
+///
+/// - Important: NEVER use Color(.red), Color(.blue), or hex literals directly
+///   in view code. Always go through DFColors.
+enum DFColors {
+
+    // MARK: - Brand Identity
+
+    /// Primary brand color — deep medical blue. Used for primary buttons,
+    /// active tab icons, and key interactive elements.
+    /// Light: #1A73E8, Dark: #4DA3FF
+    static let brandPrimary = Color("BrandPrimary")
+
+    /// Secondary brand — muted teal. Used for secondary actions, borders,
+    /// and subtle emphasis. Complements brandPrimary without competing.
+    /// Light: #26A69A, Dark: #4DB6AC
+    static let brandSecondary = Color("BrandSecondary")
+
+    // MARK: - Surfaces & Backgrounds
+
+    /// Primary background — the canvas color behind all content.
+    /// Light: .systemBackground, Dark: .systemBackground
+    static let backgroundPrimary = Color("BackgroundPrimary")
+
+    /// Secondary background — used for cards, grouped sections, modals.
+    /// Light: .secondarySystemBackground, Dark: .secondarySystemBackground
+    static let backgroundSecondary = Color("BackgroundSecondary")
+
+    /// Elevated surface — for floating elements like sheets and popovers.
+    /// Slightly different from backgroundSecondary to create visual depth.
+    static let surfaceElevated = Color("SurfaceElevated")
+
+    // MARK: - Text
+
+    /// Primary text — maximum contrast for body copy and headings.
+    static let textPrimary = Color("TextPrimary")
+
+    /// Secondary text — reduced emphasis for captions, metadata, timestamps.
+    static let textSecondary = Color("TextSecondary")
+
+    /// Tertiary text — lowest emphasis, placeholder text, disabled labels.
+    static let textTertiary = Color("TextTertiary")
+
+    /// Inverse text — for use on dark/colored backgrounds (e.g., inside buttons).
+    static let textInverse = Color("TextInverse")
+
+    // MARK: - Risk Levels (Clinical Significance)
+    // These colors ONLY appear in risk-related contexts. Never use them decoratively.
+
+    /// Low risk — strong confidence of benign classification.
+    /// Maps to Apple's system green for HIG compliance.
+    /// All malignant class probabilities < 10%.
+    static let riskLow = Color(.systemGreen)           // #34C759
+
+    /// Moderate risk — warrants monitoring or follow-up.
+    /// Any malignant class probability between 10-30%.
+    static let riskModerate = Color(.systemOrange)      // #FF9500
+
+    /// High risk — consult a dermatologist.
+    /// Melanoma or BCC probability > 30%.
+    static let riskHigh = Color(.systemRed)             // #FF3B30
+
+    // MARK: - Semantic / Functional
+
+    /// Interactive element tint — links, toggles, pickers.
+    static let interactive = Color("Interactive")
+
+    /// Destructive action — delete scan, clear history.
+    static let destructive = Color(.systemRed)
+
+    /// Divider lines and subtle borders.
+    static let divider = Color("Divider")
+
+    /// Disclaimer banner background — warm neutral, never alarming.
+    /// Deliberately NOT yellow/red to avoid false urgency that numbs users.
+    static let disclaimerBackground = Color("DisclaimerBackground")
+
+    /// Body map region highlight color when selected.
+    static let bodyMapHighlight = Color("BrandPrimary").opacity(0.35)
+
+    /// GradCAM heatmap overlay tint — warm-to-hot gradient endpoints.
+    static let gradcamCool = Color(.systemBlue)
+    static let gradcamHot = Color(.systemRed)
+
+    // MARK: - Chart Colors (Probability Bar Chart)
+    // One color per diagnostic category, ordered by clinical severity.
+
+    /// Returns the designated chart color for each lesion category.
+    /// Colors are chosen for maximum distinguishability under common
+    /// color vision deficiencies (protanopia, deuteranopia).
+    static func chartColor(for category: LesionCategory) -> Color {
+        switch category {
+        case .melanoma:         return Color("ChartMelanoma")       // warm red
+        case .bcc:              return Color("ChartBCC")            // orange
+        case .akiec:            return Color("ChartAkiec")          // amber
+        case .bkl:              return Color("ChartBKL")            // teal
+        case .nv:               return Color("ChartNV")             // blue
+        case .df:               return Color("ChartDF")             // indigo
+        case .vascular:         return Color("ChartVascular")       // purple
+        }
+    }
+}
+```
+
+### DFTypography.swift — Font Scale
+```swift
+/// Typography scale using SF Pro with Dynamic Type support.
+///
+/// Every text style is defined here with a semantic name. All styles use
+/// Apple's built-in scaling via .font(.system(...).leading(...)) so they
+/// respond to the user's accessibility text size preference automatically.
+///
+/// - Important: NEVER use .font(.system(size: 16)) in views.
+///   Always use DFTypography.bodyRegular or equivalent.
+enum DFTypography {
+
+    // MARK: - Display (Hero/Result Screens)
+
+    /// Large result confidence percentage (e.g., "87.3%")
+    /// 34pt bold, tight leading.
+    static let displayLarge = Font.system(size: 34, weight: .bold, design: .rounded)
+
+    /// Primary diagnosis name on results screen (e.g., "Melanocytic Nevi")
+    /// 28pt semibold.
+    static let displayMedium = Font.system(size: 28, weight: .semibold, design: .default)
+
+    // MARK: - Headings
+
+    /// Screen titles, section headers.
+    /// Maps to .title2 for Dynamic Type scaling.
+    static let headline = Font.title2.weight(.semibold)
+
+    /// Card titles, subsection headers.
+    static let subheadline = Font.headline
+
+    // MARK: - Body
+
+    /// Standard body text — descriptions, educational content, metadata labels.
+    static let bodyRegular = Font.body
+
+    /// Emphasized body — key values, selected states.
+    static let bodyBold = Font.body.weight(.semibold)
+
+    // MARK: - Supporting
+
+    /// Captions, timestamps, chart axis labels.
+    static let caption = Font.caption
+
+    /// Small metadata — image dimensions, model version string.
+    static let captionSmall = Font.caption2
+
+    /// Disclaimer text — readable but visually secondary.
+    static let disclaimer = Font.footnote
+
+    /// Monospaced — probability values, debug info, technical metadata.
+    static let mono = Font.system(size: 14, weight: .medium, design: .monospaced)
+}
+```
+
+### DFSpacing.swift — Spacing Scale
+```swift
+/// Consistent spacing scale used across all layouts.
+///
+/// Based on a 4pt base unit. Using a constrained scale prevents "magic number"
+/// padding and ensures visual rhythm throughout the app.
+///
+/// Rule: If the spacing you need isn't in this enum, you're probably over-customizing.
+/// Pick the nearest value instead of adding a new one.
+enum DFSpacing {
+    /// 4pt — hairline gaps, icon-to-label micro spacing
+    static let xxs: CGFloat = 4
+
+    /// 8pt — tight internal padding (badge content, chip labels)
+    static let xs: CGFloat = 8
+
+    /// 12pt — default internal padding within cards and list rows
+    static let sm: CGFloat = 12
+
+    /// 16pt — standard padding around content areas, between related elements
+    static let md: CGFloat = 16
+
+    /// 24pt — between distinct content sections on a screen
+    static let lg: CGFloat = 24
+
+    /// 32pt — major section separation, top/bottom screen margins
+    static let xl: CGFloat = 32
+
+    /// 48pt — hero spacing, splash screen vertical rhythm
+    static let xxl: CGFloat = 48
+
+    // MARK: - Semantic Spacing
+
+    /// Minimum touch target dimension — Apple HIG requires 44pt.
+    static let touchTarget: CGFloat = 44
+
+    /// Standard corner radius for cards and buttons.
+    static let cornerRadius: CGFloat = 12
+
+    /// Corner radius for small elements (badges, chips, tags).
+    static let cornerRadiusSmall: CGFloat = 8
+
+    /// Corner radius for pill-shaped elements (risk badge, toggle).
+    static let cornerRadiusPill: CGFloat = 20
+
+    /// Standard screen edge horizontal padding.
+    static let screenHorizontal: CGFloat = 20
+
+    /// Standard screen top/bottom safe area padding supplement.
+    static let screenVertical: CGFloat = 16
+}
+```
+
+### DFShadows.swift — Elevation
+```swift
+/// Shadow definitions for conveying elevation and depth.
+///
+/// Three levels: subtle (cards on surface), medium (modals, floating buttons),
+/// strong (sheets, popovers). Each has light and dark mode calibration.
+enum DFShadows {
+
+    /// Subtle card elevation — used for DFCard default state.
+    static let card = ShadowStyle(
+        color: Color.black.opacity(0.06),
+        radius: 8,
+        x: 0,
+        y: 2
+    )
+
+    /// Medium elevation — floating action buttons, bottom sheets.
+    static let elevated = ShadowStyle(
+        color: Color.black.opacity(0.10),
+        radius: 16,
+        x: 0,
+        y: 4
+    )
+
+    /// Strong elevation — modal overlays, popovers.
+    static let modal = ShadowStyle(
+        color: Color.black.opacity(0.16),
+        radius: 24,
+        x: 0,
+        y: 8
+    )
+}
+
+/// Reusable shadow definition applied via a ViewModifier.
+struct ShadowStyle {
+    let color: Color
+    let radius: CGFloat
+    let x: CGFloat
+    let y: CGFloat
+}
+
+extension View {
+    /// Applies a DFShadows style to this view.
+    func dfShadow(_ style: ShadowStyle) -> some View {
+        self.shadow(color: style.color, radius: style.radius, x: style.x, y: style.y)
+    }
+}
+```
+
+### DFIcons.swift — Icon Constants
+```swift
+/// SF Symbol name constants and custom icon references.
+///
+/// Centralizing icon names prevents typos (SF Symbols fail silently with wrong names)
+/// and makes it easy to swap icons globally.
+enum DFIcons {
+    // MARK: - Tab Bar
+    static let tabScan = "camera.viewfinder"
+    static let tabHistory = "clock.arrow.circlepath"
+    static let tabLearn = "book.fill"
+    static let tabAbout = "info.circle.fill"
+
+    // MARK: - Actions
+    static let capture = "camera.circle.fill"
+    static let gallery = "photo.on.rectangle"
+    static let analyze = "wand.and.stars"
+    static let save = "square.and.arrow.down"
+    static let export = "square.and.arrow.up"
+    static let delete = "trash"
+    static let compare = "rectangle.on.rectangle"
+
+    // MARK: - Risk Level (paired with color, always show both)
+    static let riskLow = "checkmark.shield.fill"
+    static let riskModerate = "exclamationmark.triangle.fill"
+    static let riskHigh = "exclamationmark.octagon.fill"
+
+    // MARK: - Informational
+    static let disclaimer = "exclamationmark.bubble.fill"
+    static let education = "lightbulb.fill"
+    static let gradcam = "eye.trianglebadge.exclamationmark"
+    static let bodyMap = "figure.stand"
+    static let age = "calendar"
+    static let sex = "person.fill"
+}
+```
+
+ENFORCEMENT RULES FOR DESIGN SYSTEM:
+- NEVER write Color(.blue), Color.red, .font(.system(size: 18)), or .padding(16) in view code
+- ALWAYS use DFColors.brandPrimary, DFTypography.bodyRegular, DFSpacing.md
+- If a color/font/spacing you need doesn't exist in the design system, ADD IT to the
+  design system files FIRST, then reference it. Do not inline it.
+- Chart colors MUST go through DFColors.chartColor(for:) — never hardcode per-category colors
+- Risk colors (green/yellow/red) are EXCLUSIVELY for risk contexts — never decorative use
+- All Assets.xcassets color sets must have both "Any Appearance" and "Dark" variants defined
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 5: SWIFT CODING STANDARDS
+# ────────────────────────────────────────────────────────────────
+
+### 5.1 — Swift Style
+- Follow Swift API Design Guidelines: https://www.swift.org/documentation/api-design-guidelines/
+- Use Swift's full type system: enums over strings, structs over dictionaries
+- Prefer value types (struct, enum) over reference types (class) unless identity semantics are needed
+- Use `let` over `var` whenever possible — default to immutability
+- Maximum line length: 120 characters (Xcode default)
+- Maximum function body: 40 lines. If longer, extract private helpers.
+- Maximum file length: 400 lines. If longer, split into extensions or separate files.
+
+### 5.2 — Naming
+```swift
+// Types: UpperCamelCase
+struct DiagnosisResult { }
+enum RiskLevel { }
+protocol ClassificationService { }
+
+// Properties & methods: lowerCamelCase
+let primaryDiagnosis: LesionCategory
+func classify(image: CVPixelBuffer) async throws -> DiagnosisResult
+
+// Boolean properties: read as assertions
+var isLoading: Bool
+var hasAcceptedDisclaimer: Bool
+var canAnalyze: Bool   // NOT: analyzeEnabled, shouldAnalyze
+
+// Constants: static let, lowerCamelCase (NOT SCREAMING_CASE)
+static let highRiskThreshold: Float = 0.30
+static let modelInputSize: Int = 380
+
+// Closures & callbacks: use descriptive names, not "completion" or "handler"
+func exportPDF(onSuccess: (URL) -> Void, onFailure: (DFError) -> Void)
+
+// Enum cases: lowerCamelCase, never abbreviated
+enum BodyRegion {
+    case scalp, face, ear, neck           // NOT: scp, fc, er, nck
+    case chest, abdomen, back             // NOT: ch, abd, bk
+    case upperExtremity, lowerExtremity   // NOT: ue, le
+    case hand, foot, genital
+}
+```
+
+### 5.3 — Access Control
+- Mark everything as restrictive as possible. Default to `private`.
+- Use `private` for anything used only within the declaring type.
+- Use `private(set)` for properties the ViewModel exposes but only it can mutate.
+- Use `internal` (implicit) for types/methods used across the module.
+- Use `public` only if building a framework (unlikely for this app).
+- NEVER leave access control implicit when the intent is private.
+
+```swift
+final class ScanViewModel: ObservableObject {
+    // External reads, internal writes
+    @Published private(set) var state: ScanState = .idle
+    @Published private(set) var result: DiagnosisResult?
+    @Published private(set) var error: DFError?
+
+    // Truly private — no one outside this class needs these
+    private let modelService: ModelService
+    private let preprocessor: ImagePreprocessor
+    private var inferenceTask: Task<Void, Never>?
+}
+```
+
+### 5.4 — Concurrency
+- Use Swift Concurrency (async/await, Task, @MainActor) — NO DispatchQueue/GCD in new code
+- Mark all ViewModels as @MainActor (they publish to SwiftUI, which requires main thread)
+- Run CoreML inference in a nonisolated async method, then publish results on @MainActor
+- Cancel in-flight tasks when the user navigates away (use .task modifier's auto-cancellation)
+- NEVER block the main thread with synchronous model loading — always load async at app launch
+
+```swift
+@MainActor
+final class ScanViewModel: ObservableObject {
+
+    /// Runs classification on a background thread and publishes results on main.
+    func analyze(image: UIImage, metadata: MetadataInput) {
+        // Cancel any prior inference that hasn't completed
+        inferenceTask?.cancel()
+
+        state = .analyzing
+
+        inferenceTask = Task {
+            do {
+                // Heavy work off main actor
+                let result = try await modelService.classify(
+                    image: preprocessor.prepare(image),
+                    metadata: metadata.encoded()
+                )
+
+                // Check cancellation before publishing
+                guard !Task.isCancelled else { return }
+
+                self.result = result
+                self.state = .completed
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = DFError(from: error)
+                self.state = .failed
+            }
+        }
+    }
+}
+```
+
+### 5.5 — Protocol-Oriented Design
+- Define protocols for all services so they can be mocked in tests and previews.
+- Name protocols by capability, not by what they are.
+
+```swift
+/// Defines the contract for skin lesion classification.
+///
+/// Concrete implementations: ``CoreMLModelService`` (production),
+/// ``MockModelService`` (previews and unit tests).
+protocol ClassificationServiceProtocol: Sendable {
+    /// Classify a preprocessed image with clinical metadata.
+    func classify(image: CVPixelBuffer, metadata: MLMultiArray) async throws -> DiagnosisResult
+}
+```
+
+### 5.6 — Dependency Injection
+- Inject services into ViewModels via initializer, with production defaults.
+- Use Environment for SwiftUI-level dependencies (e.g., persistence context).
+
+```swift
+@MainActor
+final class ScanViewModel: ObservableObject {
+    private let classificationService: ClassificationServiceProtocol
+    private let preprocessor: ImagePreprocessingProtocol
+
+    /// - Parameters:
+    ///   - classificationService: Defaults to ``CoreMLModelService.shared`` in production.
+    ///   - preprocessor: Defaults to ``ImagePreprocessor()`` in production.
+    init(
+        classificationService: ClassificationServiceProtocol = CoreMLModelService.shared,
+        preprocessor: ImagePreprocessingProtocol = ImagePreprocessor()
+    ) {
+        self.classificationService = classificationService
+        self.preprocessor = preprocessor
+    }
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 6: SWIFTUI VIEW STANDARDS
+# ────────────────────────────────────────────────────────────────
+
+### 6.1 — View Structure
+Every view follows this template:
+```swift
+/// Brief description of what this screen/component shows and when it appears.
+struct ResultsView: View {
+
+    // MARK: - Dependencies
+    @StateObject private var viewModel: ResultsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    // MARK: - Local State (view-only, transient UI state)
+    @State private var showGradCAM = false
+
+    // MARK: - Body
+    var body: some View {
+        content
+            .navigationTitle("Results")
+            .toolbar { toolbarContent }
+            .alert(item: $viewModel.error) { error in ... }
+            .onAppear { viewModel.onAppear() }
+    }
+
+    // MARK: - Subviews (extracted for readability, NEVER exceed 25 lines in body)
+
+    private var content: some View { ... }
+    private var toolbarContent: some ToolbarContent { ... }
+    private var probabilityChart: some View { ... }
+}
+```
+
+### 6.2 — Rules for Views
+- body MUST be under 25 lines — extract subviews as computed properties or standalone Views
+- Views contain ZERO business logic — no if/else that computes values, no formatting, no networking
+- All state comes from the ViewModel — views read @Published properties, call ViewModel methods
+- Use @StateObject for the owning view, @ObservedObject when passing down
+- Use @State ONLY for view-local transient UI state (isSheetPresented, animation flags)
+
+### 6.3 — Preview Standards
+Every view MUST have at least 2 previews:
+```swift
+#Preview("Results — Low Risk") {
+    ResultsView(viewModel: .preview(risk: .low))
+}
+
+#Preview("Results — High Risk (Melanoma)") {
+    ResultsView(viewModel: .preview(risk: .high))
+}
+```
+
+ViewModels must provide a static `.preview(...)` factory for previews:
+```swift
+extension ResultsViewModel {
+    static func preview(risk: RiskLevel) -> ResultsViewModel {
+        let vm = ResultsViewModel(
+            classificationService: MockModelService(riskLevel: risk)
+        )
+        // Pre-populate with sample data so preview renders immediately
+        vm.result = DiagnosisResult.sample(risk: risk)
+        return vm
+    }
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 7: EDGE CASE HANDLING
+# ────────────────────────────────────────────────────────────────
+
+Every implementation MUST handle edge cases. Before writing any feature, enumerate
+the edge cases first in a comment block, then implement handling for each one.
+
+### 7.1 — Camera & Image Capture
+```
+Edge cases to handle:
+- Camera permission denied → show settings deep-link with explanation
+- Camera permission not yet requested → request with clear purpose string
+- Camera unavailable (Simulator, iPod) → graceful fallback to photo library only
+- Photo library permission denied → show settings deep-link
+- Photo library empty → show empty state, suggest camera
+- Selected image is corrupt / cannot be decoded → show error, allow retry
+- Selected image is extremely small (< 100×100) → warn quality may be poor
+- Selected image is extremely large (> 8000×8000) → downsample before processing
+- Image orientation is non-standard (EXIF rotated) → normalize before preprocessing
+- User switches away from camera mid-capture → release camera session resources
+- Device runs out of memory during image processing → catch and show friendly error
+- User rapidly taps capture multiple times → debounce, process only first
+```
+
+### 7.2 — CoreML Inference
+```
+Edge cases to handle:
+- Model file missing from bundle → fatal in debug, graceful error in release
+- Model fails to load (corrupt .mlpackage) → show error with "reinstall app" suggestion
+- Inference produces NaN or Inf values → detect, return error, log for debugging
+- Softmax probabilities don't sum to ~1.0 (tolerance 0.001) → log warning, normalize
+- All probabilities are nearly equal (< 0.20 each) → show "low confidence" warning
+- Inference takes > 5 seconds (degraded device) → show timeout warning, offer retry
+- Neural Engine unavailable → fallback to GPU → CPU (CoreML handles, but log which was used)
+- Multiple rapid inference requests → cancel previous, run latest
+- Memory pressure during inference → catch, suggest closing other apps
+- Background/foreground transition during inference → resume gracefully, don't lose state
+```
+
+### 7.3 — Metadata Input
+```
+Edge cases to handle:
+- Age left at default (0) → is this intentional? Prompt "Did you mean to set age to 0?"
+- Age set to 0 for infant → valid, handle correctly (model was trained with age 0)
+- Age > 100 → technically valid but unusual; accept silently, clamp in encoding
+- Sex set to "Prefer not to say" → encode as unknown index (2), same as training pipeline
+- No body region selected → disable analyze button, show hint text
+- User changes metadata after seeing results → invalidate results, require re-analysis
+```
+
+### 7.4 — Results & Risk Assessment
+```
+Edge cases to handle:
+- Melanoma probability exactly at threshold (0.30) → ≥ 0.30 = high risk (inclusive)
+- Multiple malignant classes above moderate threshold → highest risk wins
+- Model very confident (> 0.95) in benign → still show disclaimer, never say "definitely benign"
+- Model very confident (> 0.95) in melanoma → show high risk, suggest urgent consultation
+- GradCAM fails to generate → show results without heatmap, log error, offer retry
+- GradCAM highlights nothing (uniform low activation) → show heatmap but note "low activation"
+- Results screen opened but user hits back before save → confirm discard ("Discard unsaved results?")
+```
+
+### 7.5 — Data Persistence
+```
+Edge cases to handle:
+- SwiftData container fails to initialize → fallback to in-memory store, warn user
+- Disk full → catch save error, show "storage full" message
+- Saving image data exceeds reasonable size → compress JPEG to quality 0.7
+- Deleting a scan → confirm with destructive alert, SwiftData cascade properly
+- Hundreds of saved scans → lazy loading, thumbnails only in list, full image on detail
+- Corrupted scan record → skip in list, don't crash, log error
+- No scans saved yet → show empty state with illustration and "Start your first scan" CTA
+- Two scans saved at the same millisecond → unique UUID, never collision
+```
+
+### 7.6 — Preprocessing Parity
+```
+CRITICAL edge cases (model will produce garbage if these are wrong):
+- Shades of Gray with solid color image (variance ≈ 0) → detect, skip constancy, log warning
+- Shades of Gray with near-black image (all channels ≈ 0) → avoid division by zero, clamp
+- Image has alpha channel → strip alpha, convert to RGB before processing
+- Image is grayscale (1 channel) → convert to 3-channel RGB (replicate)
+- Image is CMYK → convert to RGB
+- Center crop on non-square image with extreme aspect ratio (e.g., 100×1000) → still works, just very zoomed
+- Float precision: preprocessing in Swift (Float32) vs Python (Float64) → acceptable, validate max diff < 2/255
+```
+
+### 7.7 — Accessibility Edge Cases
+```
+Edge cases to handle:
+- VoiceOver enabled → all interactive elements have descriptive labels
+- VoiceOver on results → read: "Primary diagnosis: Melanocytic Nevi, 87 percent confidence, Low Risk"
+- VoiceOver on body map → each region is a button with label: "Select lower extremity"
+- VoiceOver on probability chart → read each bar: "Melanoma, 3 percent"
+- Dynamic Type at maximum (AX5) → layout doesn't break, text doesn't clip
+- Dynamic Type at minimum → still readable, touch targets still 44pt
+- Reduce Motion enabled → skip all animations, show static states
+- Bold Text enabled → all text respects bold preference
+- Color Filters enabled → risk information conveyed by icon + text, not only color
+- Switch Control → all actions reachable via sequential navigation
+```
+
+### 7.8 — PDF Export Edge Cases
+```
+Edge cases to handle:
+- GradCAM not generated → export PDF without heatmap, note "GradCAM unavailable"
+- Image too large for PDF page → scale to fit with aspect ratio preserved
+- Disclaimer text must ALWAYS appear in exported PDF — never optional
+- PDF rendering fails → show error, suggest screenshot as alternative
+- Share sheet dismissed without action → no crash, no data loss
+```
+
+IMPLEMENTATION PATTERN — Use guard-let with early returns for edge cases:
+```swift
+/// Preprocesses a raw UIImage for model input.
+///
+/// Handles orientation normalization, color space conversion, center cropping,
+/// Shades of Gray color constancy, and final resize to model input dimensions.
+///
+/// - Parameter rawImage: The unprocessed image from camera or photo library.
+/// - Returns: A `CVPixelBuffer` ready for CoreML inference.
+/// - Throws: ``DFError.imagePreprocessingFailed`` with descriptive reason.
+func prepare(_ rawImage: UIImage) throws -> CVPixelBuffer {
+    // Edge case: UIImage with no CGImage backing (e.g., CIImage-only)
+    guard let cgImage = rawImage.cgImage ?? rawImage.ciImageBackedCGImage else {
+        throw DFError.imagePreprocessingFailed(reason: "Unable to extract CGImage from input")
+    }
+
+    // Edge case: Extremely small images produce unreliable predictions
+    guard cgImage.width >= Self.minimumInputDimension,
+          cgImage.height >= Self.minimumInputDimension else {
+        throw DFError.imagePreprocessingFailed(
+            reason: "Image too small (\(cgImage.width)×\(cgImage.height)). Minimum: \(Self.minimumInputDimension)×\(Self.minimumInputDimension)"
+        )
+    }
+
+    // Edge case: Non-RGB color space (grayscale, CMYK)
+    let rgbImage = try convertToRGB(cgImage)
+
+    // Edge case: Fix orientation from EXIF metadata before spatial transforms
+    let oriented = normalizeOrientation(rgbImage, exifOrientation: rawImage.imageOrientation)
+
+    let cropped = centerCropToSquare(oriented)
+    let constancyApplied = try applyShadesOfGray(cropped, power: Self.shadesOfGrayPower)
+    let resized = resize(constancyApplied, to: Self.modelInputSize)
+
+    return try convertToPixelBuffer(resized)
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 8: ERROR HANDLING
+# ────────────────────────────────────────────────────────────────
+
+Use a unified error enum for the entire app. Every error case has:
+- A user-facing title (short, non-technical)
+- A user-facing message (actionable, tells them what to do)
+- An optional recovery suggestion
+- An underlying error for logging/debugging
+
+```swift
+/// Unified error type for all DermaFusion operations.
+///
+/// Each case maps to a specific failure mode with both developer-facing detail
+/// (for logging) and user-facing messaging (for alerts/banners).
+///
+/// ## Usage
+/// ```swift
+/// catch {
+///     let dfError = DFError(from: error)
+///     viewModel.error = dfError     // Published, triggers alert in view
+///     Logger.app.error("\(dfError.debugDescription)")
+/// }
+/// ```
+enum DFError: Error, Identifiable, LocalizedError {
+    /// CoreML model file not found in app bundle.
+    case modelNotLoaded
+
+    /// CoreML prediction threw an error during inference.
+    case inferenceFailed(underlying: Error)
+
+    /// Input image dimensions don't match model's expected 380×380.
+    case invalidInputDimensions(width: Int, height: Int)
+
+    /// Image could not be decoded, converted, or preprocessed.
+    case imagePreprocessingFailed(reason: String)
+
+    /// GradCAM heatmap generation failed (non-fatal — results still valid).
+    case gradcamFailed(underlying: Error)
+
+    /// Camera permission denied or restricted.
+    case cameraPermissionDenied
+
+    /// Photo library permission denied or restricted.
+    case photoLibraryPermissionDenied
+
+    /// SwiftData persistence operation failed.
+    case persistenceFailed(underlying: Error)
+
+    /// PDF generation or export failed.
+    case exportFailed(underlying: Error)
+
+    /// Device storage is full — cannot save scan.
+    case storageFull
+
+    /// Inference produced invalid output (NaN, Inf, or probabilities don't sum to ~1.0).
+    case invalidModelOutput(detail: String)
+
+    // MARK: - Identifiable (for .alert(item:))
+    var id: String { localizedDescription }
+
+    // MARK: - User-Facing Messages
+
+    var userTitle: String {
+        switch self {
+        case .modelNotLoaded:               return "Model Unavailable"
+        case .inferenceFailed:              return "Analysis Failed"
+        case .invalidInputDimensions:       return "Image Size Issue"
+        case .imagePreprocessingFailed:     return "Image Processing Error"
+        case .gradcamFailed:                return "Heatmap Unavailable"
+        case .cameraPermissionDenied:       return "Camera Access Needed"
+        case .photoLibraryPermissionDenied: return "Photo Access Needed"
+        case .persistenceFailed:            return "Save Failed"
+        case .exportFailed:                 return "Export Failed"
+        case .storageFull:                  return "Storage Full"
+        case .invalidModelOutput:           return "Analysis Error"
+        }
+    }
+
+    var userMessage: String {
+        switch self {
+        case .modelNotLoaded:
+            return "The classification model could not be loaded. Please reinstall the app."
+        case .inferenceFailed:
+            return "The analysis could not be completed. Please try again."
+        case .invalidInputDimensions(let w, let h):
+            return "The image (\(w)×\(h)) could not be processed. Please try a different image."
+        case .imagePreprocessingFailed(let reason):
+            return "The image could not be prepared for analysis: \(reason). Please try a different image."
+        case .gradcamFailed:
+            return "The attention heatmap could not be generated, but your results are still valid."
+        case .cameraPermissionDenied:
+            return "DermaFusion needs camera access to capture images. You can enable this in Settings."
+        case .photoLibraryPermissionDenied:
+            return "DermaFusion needs photo library access to select images. You can enable this in Settings."
+        case .persistenceFailed:
+            return "Your scan could not be saved. Please check available storage and try again."
+        case .exportFailed:
+            return "The PDF report could not be generated. Please try again."
+        case .storageFull:
+            return "Your device storage is full. Free up space and try again."
+        case .invalidModelOutput(let detail):
+            return "The model produced an unexpected output. Please try with a different image. (\(detail))"
+        }
+    }
+
+    /// Returns a "Settings" deep-link action for permission-related errors, nil otherwise.
+    var recoverySuggestion: (() -> Void)? {
+        switch self {
+        case .cameraPermissionDenied, .photoLibraryPermissionDenied:
+            return {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        default:
+            return nil
+        }
+    }
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 9: TESTING STANDARDS
+# ────────────────────────────────────────────────────────────────
+
+### 9.1 — Test Categories and Requirements
+
+UNIT TESTS (DermaFusionTests/) — Required for:
+- All Services (ModelService, ImagePreprocessor, GradCAMService, PDFExportService)
+- All ViewModels (state transitions, error handling, edge cases)
+- All Model types (encoding correctness, threshold logic, computed properties)
+- All Extensions (preprocessing math, formatting, safe subscripts)
+
+UI TESTS (DermaFusionUITests/) — Required for:
+- First-launch disclaimer flow (cannot be bypassed)
+- Full scan happy path (camera → metadata → results)
+- Accessibility: VoiceOver reads results correctly
+
+PARITY TESTS — Required before shipping:
+- Shades of Gray (Swift output vs Python output on 50 reference images, max diff < 2/255)
+- Metadata encoding (Swift tensor vs Python tensor on 20 test cases, exact match)
+- CoreML inference (CoreML output vs PyTorch output on 100 test images, max diff < 0.01)
+
+### 9.2 — Test Naming Convention
+```swift
+func test_classify_withValidInputs_returnsSevenClassProbabilities() { }
+func test_classify_withCorruptImage_throwsPreprocessingError() { }
+func test_riskLevel_whenMelanomaProbabilityAtThreshold_returnsHigh() { }
+func test_shadesOfGray_withNearBlackImage_doesNotDivideByZero() { }
+func test_metadataEncoding_withMissingAge_setsAgeMissingFlag() { }
+```
+
+Pattern: `test_[methodName]_[scenario]_[expectedBehavior]`
+
+### 9.3 — Test Structure (AAA Pattern)
+```swift
+func test_classify_withValidInputs_returnsNormalizedProbabilities() async throws {
+    // Arrange — set up inputs and expected outputs
+    let service = CoreMLModelService(model: testModel)
+    let image = TestFixtures.samplePixelBuffer(size: 380)
+    let metadata = TestFixtures.sampleMetadata(age: 55, sex: .male, location: .back)
+
+    // Act — execute the method under test
+    let result = try await service.classify(image: image, metadata: metadata)
+
+    // Assert — verify the output meets expectations
+    XCTAssertEqual(result.probabilities.count, 7, "Should return exactly 7 class probabilities")
+
+    let sum = result.probabilities.values.reduce(0, +)
+    XCTAssertEqual(sum, 1.0, accuracy: 0.001, "Probabilities should sum to 1.0")
+
+    for (category, probability) in result.probabilities {
+        XCTAssertGreaterThanOrEqual(probability, 0.0, "\(category) probability should be non-negative")
+        XCTAssertLessThanOrEqual(probability, 1.0, "\(category) probability should not exceed 1.0")
+    }
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 10: PREPROCESSING PIPELINE — MUST MATCH PYTHON EXACTLY
+# ────────────────────────────────────────────────────────────────
+
+The iOS preprocessing pipeline MUST produce IDENTICAL output to the Python training
+pipeline. Any deviation = the model receives out-of-distribution input = garbage output.
+
+PYTHON PIPELINE (ground truth):
+1. Load image as RGB (PIL)
+2. Center crop to square
+3. Resize to 380×380 (bilinear interpolation)
+4. Apply Shades of Gray color constancy (power=6)
+5. Convert to float32, scale /255.0
+6. Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+
+SWIFT PIPELINE (must replicate):
+1. Extract CGImage from UIImage (handle EXIF orientation first)
+2. Convert to RGB if not already (handle grayscale, CMYK)
+3. Center crop to square
+4. Resize to 380×380 (use vImage or Core Graphics with bilinear interpolation)
+5. Apply Shades of Gray (power=6) — custom implementation (see below)
+6. CoreML ImageType input handles /255.0 scaling and ImageNet normalization via
+   scale and bias parameters set during model conversion
+
+SHADES OF GRAY ALGORITHM (implement exactly):
+```
+For each color channel c in {R, G, B}:
+    channel_mean_p = mean(channel^power)^(1/power)     // Minkowski norm
+gray = mean([R_mean_p, G_mean_p, B_mean_p])
+For each pixel, for each channel:
+    output = pixel * (gray / channel_mean_p)
+    output = clamp(output, 0, 255)
+```
+
+VALIDATION PROTOCOL:
+- Create 50 reference images in Python: save input + preprocessed output as numpy arrays
+- In Swift test: load same input images, preprocess, compare pixel-by-pixel
+- Pass criteria: max absolute difference per pixel < 2 (accounts for uint8 rounding)
+- If ANY image fails: debug, do not proceed
+
+METADATA ENCODING (must match training exactly):
+```
+Index 0: normalized_age = age / 100.0 (or 0.0 if missing)
+Index 1: age_missing = 1.0 if age is nil, 0.0 otherwise
+Index 2: sex_index = male: 0, female: 1, unknown: 2 (integer, NOT one-hot)
+Index 3+: location_index = integer index for body region (matches training label encoder order)
+```
+
+WARNING: The order and encoding of metadata features MUST match what the model was
+trained on. If the Python pipeline encodes sex as [0, 1, 2] and location as integers
+[0..14], the Swift code must do exactly the same. Verify by comparing MLMultiArray
+output in Swift vs numpy array output in Python for 20 test cases.
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 11: COREML & PERFORMANCE
+# ────────────────────────────────────────────────────────────────
+
+### 11.1 — Model Loading
+- Load the model ONCE at app launch using lazy initialization in a singleton service
+- Load asynchronously — never block the launch sequence
+- Use MLModelConfiguration with:
+  - computeUnits = .all (lets CoreML choose Neural Engine → GPU → CPU)
+  - allowLowPrecisionAccumulationOnGPU = true
+
+```swift
+/// Singleton service managing CoreML model lifecycle and inference.
+///
+/// The model is loaded asynchronously at app launch and cached for the lifetime
+/// of the process. All inference methods are nonisolated async to run off the main actor.
+actor CoreMLModelService: ClassificationServiceProtocol {
+    static let shared = CoreMLModelService()
+
+    private var model: DermaFusion?
+    private var isLoaded = false
+
+    /// Loads the model from the app bundle. Call once at app launch.
+    ///
+    /// - Throws: ``DFError.modelNotLoaded`` if the .mlpackage is missing or corrupt.
+    func loadModel() async throws {
+        guard !isLoaded else { return }
+
+        let config = MLModelConfiguration()
+        config.computeUnits = .all
+
+        guard let model = try? DermaFusion(configuration: config) else {
+            throw DFError.modelNotLoaded
+        }
+
+        self.model = model
+        self.isLoaded = true
+    }
+}
+```
+
+### 11.2 — Performance Targets
+- Model file size: < 50MB (use FLOAT16 quantization, consider INT8 for <25MB)
+- Cold inference (first run): < 500ms
+- Warm inference (subsequent): < 200ms, target < 100ms
+- Peak memory during inference: < 200MB
+- App launch to interactive: < 2 seconds
+- GradCAM generation: < 300ms additional
+
+### 11.3 — Performance Monitoring
+- Log inference time for every prediction (os_signpost or os_log)
+- Log which compute unit was used (Neural Engine, GPU, or CPU)
+- Include timing in debug build overlay (hidden in release)
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 12: ACCESSIBILITY (NON-NEGOTIABLE)
+# ────────────────────────────────────────────────────────────────
+
+Accessibility is not optional in a medical-context app. Follow Apple HIG and WCAG 2.1 AA.
+
+REQUIREMENTS:
+- Every interactive element: .accessibilityLabel() with descriptive text
+- Every image: .accessibilityLabel() describing content, not filename
+- Risk badges: convey meaning via label, not just color
+  → ".accessibilityLabel("High risk — consult a dermatologist")"
+- Probability chart: each bar reads category name and percentage
+- Body map: each region is a button with label "Select [region name]"
+- All text: uses DFTypography (Dynamic Type enabled by default with .font(.body) etc.)
+- Touch targets: minimum 44×44pt on all tappable elements
+- Animations: respect @Environment(\.accessibilityReduceMotion)
+- Group related elements: .accessibilityElement(children: .combine) where appropriate
+- No meaning conveyed solely through color — always pair with icon or text
+
+```swift
+DFRiskBadge(level: result.riskLevel)
+    .accessibilityLabel(result.riskLevel.accessibilityLabel)
+    // Reads: "High risk — consult a dermatologist" NOT just "red badge"
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 13: MEDICAL DISCLAIMER RULES
+# ────────────────────────────────────────────────────────────────
+
+DISCLAIMER TEXT (exact, do not modify):
+"DermaFusion is a research and educational tool. It is NOT a medical device and has
+NOT been approved by the FDA or any regulatory authority. Results should NOT be used
+for self-diagnosis. Always consult a qualified dermatologist for skin concerns."
+
+PLACEMENT RULES:
+1. Full-screen on first launch — must tap "I Understand" to proceed
+2. Store acceptance in UserDefaults (key: "hasAcceptedDisclaimer")
+3. Persistent banner at bottom of ResultsView — NOT dismissible
+4. In "About" screen as full text
+5. In every exported PDF report — top of document
+
+LANGUAGE RULES (apply everywhere in the app):
+- NEVER say: "you have", "this is", "diagnosis", "diagnosed with"
+- ALWAYS say: "suggests", "indicates", "classification result", "consistent with"
+- NEVER say: "definitely benign", "nothing to worry about", "safe"
+- ALWAYS say: "low risk classification", "consult a dermatologist for confirmation"
+
+```swift
+/// Returns a clinically appropriate description of the primary result.
+///
+/// Uses hedging language ("suggests", "consistent with") rather than diagnostic
+/// language ("you have", "this is") to avoid implying medical diagnosis.
+///
+/// - Important: This wording was reviewed for medical-legal appropriateness.
+///   Do not modify without consultation.
+func resultDescription(for result: DiagnosisResult) -> String {
+    let category = result.primaryDiagnosis.displayName
+    let confidence = Int(result.topProbability * 100)
+    return "Classification suggests \(category) (\(confidence)% confidence). This is not a diagnosis. Please consult a dermatologist."
+}
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 14: PRIVACY & DATA HANDLING
+# ────────────────────────────────────────────────────────────────
+
+ABSOLUTE RULES:
+- ZERO network calls involving health data — no analytics, no crash reports with images
+- All images stored ONLY in app's SwiftData container (NOT Photos library, NOT iCloud)
+- No health data in UserDefaults (only UI preferences like "hasAcceptedDisclaimer")
+- Core Data / SwiftData container: NOT synced to iCloud, NOT included in backups by default
+- No third-party SDKs that transmit data (no Firebase, no Amplitude, no Mixpanel)
+- If app is deleted, all scan data is permanently erased (no cloud backup)
+- App Store privacy label: "Data Not Collected"
+
+```swift
+// In ModelContainer configuration — ensure no cloud sync
+let schema = Schema([ScanRecord.self])
+let config = ModelConfiguration(
+    schema: schema,
+    isStoredInMemoryOnly: false,
+    allowsSave: true,
+    // CRITICAL: No CloudKit sync for health data
+    cloudKitDatabase: .none
+)
+```
+
+INFO.PLIST PRIVACY STRINGS (required for App Store submission):
+- NSCameraUsageDescription: "DermaFusion uses the camera to capture images of skin lesions for on-device analysis. Images never leave your device."
+- NSPhotoLibraryUsageDescription: "DermaFusion accesses your photo library so you can select existing images for analysis. Images never leave your device."
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 15: GIT & VERSION CONTROL
+# ────────────────────────────────────────────────────────────────
+
+COMMIT MESSAGE FORMAT:
+```
+[area] Brief description (imperative mood, < 72 chars)
+
+Detailed explanation if needed. Reference design doc sections or edge cases.
+```
+
+Areas: [ui], [model], [service], [design-system], [test], [infra], [docs], [fix], [refactor]
+
+Examples:
+```
+[service] Add Shades of Gray color constancy to ImagePreprocessor
+[ui] Build body map interactive view with region selection
+[test] Add parity tests comparing Swift vs Python preprocessing
+[design-system] Define risk level colors and typography scale
+[fix] Handle division by zero in Shades of Gray for near-black images
+[model] Add CoreML conversion script with FLOAT16 precision
+```
+
+.GITIGNORE — Always include:
+```
+# Xcode
+*.xcuserdata
+*.xcworkspace
+DerivedData/
+
+# CoreML models (large binary — use Git LFS or download at build time)
+*.mlpackage
+*.mlmodel
+
+# Sensitive
+*.p12
+*.mobileprovision
+
+# OS
+.DS_Store
+```
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 16: BUILD VERIFICATION GATES
+# ────────────────────────────────────────────────────────────────
+
+Before considering any milestone complete, ALL gates must pass.
+
+### GATE 1 — Design System (before any views)
+- [ ] DFColors has all colors defined with light + dark variants in Assets.xcassets
+- [ ] DFTypography has all font styles defined with Dynamic Type support
+- [ ] DFSpacing has complete spacing scale
+- [ ] DFIcons has all SF Symbol constants
+- [ ] At least 3 reusable components built (DFButton, DFCard, DFRiskBadge)
+- [ ] Preview of each component renders correctly in light + dark mode
+
+### GATE 2 — Model Integration (before any UI work)
+- [ ] CoreML model loads successfully in test target
+- [ ] Inference produces 7-class probability output
+- [ ] Parity test: CoreML vs PyTorch on 100 images, max diff < 0.01
+- [ ] Preprocessing parity: Swift vs Python on 50 images, max pixel diff < 2
+- [ ] Metadata encoding parity: Swift vs Python on 20 cases, exact match
+- [ ] Inference time benchmarked on target device (< 200ms)
+
+### GATE 3 — MVP Feature Complete
+- [ ] Camera capture works with circular overlay guide
+- [ ] Photo library selection works
+- [ ] Body map allows region selection (all 12 regions)
+- [ ] Age slider + sex selector work and encode correctly
+- [ ] Analyze button runs inference and shows results
+- [ ] Probability chart renders with correct colors and values
+- [ ] Risk badge shows correct level based on thresholds
+- [ ] Medical disclaimer shows on first launch and cannot be bypassed
+- [ ] Results screen has persistent disclaimer banner
+
+### GATE 4 — Quality (before any demo/submission)
+- [ ] All unit tests pass (Services, ViewModels, Models)
+- [ ] UI tests pass (disclaimer flow, scan flow)
+- [ ] VoiceOver reads all screens correctly
+- [ ] Dynamic Type at AX5 doesn't break any layout
+- [ ] Dark mode looks correct on all screens
+- [ ] No console warnings or constraint errors in debug
+- [ ] Instruments: no memory leaks, no main thread hangs > 100ms
+- [ ] Tested on oldest supported device (iPhone 12)
+
+
+# ────────────────────────────────────────────────────────────────
+# SECTION 17: CURSOR AI BEHAVIOR RULES
+# ────────────────────────────────────────────────────────────────
+
+When implementing any feature, Cursor MUST:
+
+1. READ the DermaFusion_iOS_Design_Doc.md section relevant to the feature FIRST
+2. LIST edge cases in a comment block BEFORE writing implementation code
+3. USE design system tokens (DFColors, DFTypography, DFSpacing) — NEVER hardcode visual values
+4. WRITE doc comments on every public/internal type and method BEFORE writing the implementation
+5. FOLLOW MVVM — views have NO business logic, ViewModels handle all state
+6. HANDLE errors with DFError — NEVER use generic Error or fatalError in production paths
+7. INCLUDE at least 2 #Preview blocks for every view (happy path + error/empty state)
+8. WRITE tests alongside code — not as an afterthought
+9. CHECK accessibility — add .accessibilityLabel to every interactive element
+10. VERIFY parity — any preprocessing or encoding code must reference the Python pipeline
+
+When implementing a new screen, follow this order:
+1. ViewModel (state, actions, error handling, edge cases)
+2. View (layout, design system tokens, accessibility)
+3. Previews (multiple states: loading, success, error, empty)
+4. Tests (ViewModel unit tests, at minimum)
+
+When modifying existing code:
+1. Read the file header and doc comments to understand the existing design
+2. Update doc comments if the behavior changes
+3. Update or add tests for the modified behavior
+4. Check if edge case comments need updating
+5. Run existing tests to verify nothing broke
+
+NEVER:
+- Use fatalError, preconditionFailure, or force-unwrap (!) in production code paths
+- Use DispatchQueue.main.async — use @MainActor or Task { @MainActor in }
+- Add any networking code that transmits health data
+- Hardcode colors, fonts, spacing, or icon names in view code
+- Skip the medical disclaimer on any screen that shows classification results
+- Use print() for logging — use os.Logger with appropriate subsystem and category
+- Merge code without at least one preview rendering correctly

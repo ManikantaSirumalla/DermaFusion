@@ -1,0 +1,6 @@
+[project]
+name = "skin-cancer-multimodal"
+version = "0.1.0"
+description = "Multi-modal deep learning for skin cancer classification"
+requires-python = ">=3.10"
+

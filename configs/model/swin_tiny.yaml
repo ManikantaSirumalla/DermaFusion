@@ -1,0 +1,7 @@
+model:
+  backbone: swin_tiny
+  pretrained: true
+  use_metadata: false
+  fusion: late
+  num_classes: 7
+

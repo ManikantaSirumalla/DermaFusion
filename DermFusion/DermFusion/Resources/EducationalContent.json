@@ -1,0 +1,296 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-02-14",
+  "sources": [
+    {
+      "id": "isic",
+      "title": "ISIC Archive",
+      "url": "https://api.isic-archive.com",
+      "license": "Per-image: CC0 / CC-BY / CC-BY-NC"
+    },
+    {
+      "id": "dermoscopydia",
+      "title": "Dermoscopedia",
+      "url": "https://dermoscopedia.org",
+      "license": "CC BY-NC-SA 4.0"
+    }
+  ],
+  "abcde": [
+    {
+      "letter": "A",
+      "title": "Asymmetry",
+      "description": "One half of the lesion does not match the other half in shape or internal structure."
+    },
+    {
+      "letter": "B",
+      "title": "Border",
+      "description": "Borders may appear irregular, notched, or blurred rather than smooth and even."
+    },
+    {
+      "letter": "C",
+      "title": "Color",
+      "description": "Multiple colors or uneven color distribution in one lesion can be concerning."
+    },
+    {
+      "letter": "D",
+      "title": "Diameter",
+      "description": "Larger size can matter, but small lesions can also be clinically important."
+    },
+    {
+      "letter": "E",
+      "title": "Evolution",
+      "description": "Any change over time in size, shape, color, or symptoms is a key warning sign."
+    }
+  ],
+  "dermoscopyBasics": [
+    {
+      "id": "derm-1",
+      "title": "What Dermoscopy Adds",
+      "body": "Dermoscopy uses magnification and controlled light to reveal subsurface patterns that are often invisible to the naked eye."
+    },
+    {
+      "id": "derm-2",
+      "title": "Polarized vs Non-Polarized",
+      "body": "Different dermoscopy modes emphasize different structures; using consistent capture improves interpretability and model stability."
+    },
+    {
+      "id": "derm-3",
+      "title": "Why Standardization Matters",
+      "body": "Consistent framing, focus, and lighting reduce input variability and help both clinicians and AI models evaluate lesions more reliably."
+    }
+  ],
+  "lesions": [
+    {
+      "categoryCode": "mel",
+      "title": "Melanoma",
+      "severity": "Malignant",
+      "overview": "Melanoma is an aggressive skin cancer arising from melanocytes and requires urgent professional evaluation.",
+      "prevalenceNote": "Minority class in HAM10000 compared with nevi.",
+      "keyVisualFeatures": [
+        "Asymmetry in shape or internal structure",
+        "Irregular or notched borders",
+        "Variegated color with dark and light components"
+      ],
+      "dermoscopicClues": [
+        "Blue-white veil",
+        "Atypical pigment network",
+        "Irregular streaks or dots"
+      ],
+      "demographics": {
+        "ageRange": "Adults, increasing risk with age",
+        "sexTendency": "No consistent strong bias across populations",
+        "commonSites": [
+          "Back",
+          "Lower extremities",
+          "Trunk"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "mel-ref-1",
+          "label": "ISIC Archive - Melanoma Collection",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "nv",
+      "title": "Melanocytic Nevus",
+      "severity": "Benign",
+      "overview": "Melanocytic nevi are common benign pigmented lesions and represent the majority class in many dermoscopy datasets.",
+      "prevalenceNote": "Largest class in HAM10000, strongly contributing to class imbalance.",
+      "keyVisualFeatures": [
+        "Symmetric structure",
+        "Regular border and shape",
+        "More uniform pigmentation"
+      ],
+      "dermoscopicClues": [
+        "Regular reticular network",
+        "Uniform globules",
+        "Homogeneous pigmentation"
+      ],
+      "demographics": {
+        "ageRange": "Common across adolescence and adulthood",
+        "sexTendency": "No strong consistent bias",
+        "commonSites": [
+          "Back",
+          "Chest",
+          "Upper extremities"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "nv-ref-1",
+          "label": "ISIC Archive - Nevus",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "bcc",
+      "title": "Basal Cell Carcinoma",
+      "severity": "Malignant",
+      "overview": "Basal cell carcinoma is a common non-melanoma skin cancer that usually grows slowly but still requires treatment.",
+      "prevalenceNote": "Moderate representation in HAM10000 relative to nevus.",
+      "keyVisualFeatures": [
+        "Pearly or translucent clinical appearance",
+        "Localized shiny papule/plaque",
+        "Possible ulceration in advanced lesions"
+      ],
+      "dermoscopicClues": [
+        "Arborizing vessels",
+        "Blue-gray ovoid nests",
+        "Maple leaf-like areas"
+      ],
+      "demographics": {
+        "ageRange": "More common in older adults",
+        "sexTendency": "Slight male predominance in some cohorts",
+        "commonSites": [
+          "Face",
+          "Neck",
+          "Sun-exposed areas"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "bcc-ref-1",
+          "label": "ISIC Archive - BCC",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "akiec",
+      "title": "Actinic Keratosis / Intraepithelial Carcinoma",
+      "severity": "Pre-cancerous / Early malignant spectrum",
+      "overview": "Actinic keratoses and related intraepithelial lesions occur on chronically sun-damaged skin and may progress without treatment.",
+      "prevalenceNote": "Smaller class with clinically important risk context.",
+      "keyVisualFeatures": [
+        "Rough keratotic surface",
+        "Erythematous to brownish scaling",
+        "Sun-damage background skin"
+      ],
+      "dermoscopicClues": [
+        "Strawberry pattern",
+        "White-yellow scales",
+        "Follicular openings with perifollicular white halos"
+      ],
+      "demographics": {
+        "ageRange": "Typically middle-aged to older adults",
+        "sexTendency": "No strong fixed bias",
+        "commonSites": [
+          "Face",
+          "Scalp",
+          "Forearms"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "akiec-ref-1",
+          "label": "ISIC Archive - AKIEC",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "bkl",
+      "title": "Benign Keratosis",
+      "severity": "Benign",
+      "overview": "Benign keratosis lesions include seborrheic keratosis-like appearances and are non-cancerous.",
+      "prevalenceNote": "Intermediate class size in HAM10000.",
+      "keyVisualFeatures": [
+        "Waxy or stuck-on appearance",
+        "Variable pigmentation",
+        "Well-demarcated lesion margin"
+      ],
+      "dermoscopicClues": [
+        "Comedo-like openings",
+        "Milia-like cysts",
+        "Fissures and ridges"
+      ],
+      "demographics": {
+        "ageRange": "More frequent with age",
+        "sexTendency": "No robust strong bias",
+        "commonSites": [
+          "Trunk",
+          "Face",
+          "Extremities"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "bkl-ref-1",
+          "label": "ISIC Archive - BKL",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "df",
+      "title": "Dermatofibroma",
+      "severity": "Benign",
+      "overview": "Dermatofibromas are benign fibrohistiocytic lesions that are often firm and stable over time.",
+      "prevalenceNote": "Rare class in HAM10000.",
+      "keyVisualFeatures": [
+        "Small firm papule",
+        "Central scar-like area",
+        "Peripheral pigment network"
+      ],
+      "dermoscopicClues": [
+        "Central white patch",
+        "Delicate peripheral network"
+      ],
+      "demographics": {
+        "ageRange": "Commonly young to middle-aged adults",
+        "sexTendency": "Reported more often in females in some cohorts",
+        "commonSites": [
+          "Lower extremities"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "df-ref-1",
+          "label": "ISIC Archive - Dermatofibroma",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    },
+    {
+      "categoryCode": "vasc",
+      "title": "Vascular Lesion",
+      "severity": "Benign",
+      "overview": "Vascular lesions in this dataset are generally benign blood-vessel related lesions such as angioma-like patterns.",
+      "prevalenceNote": "Rarest class in HAM10000.",
+      "keyVisualFeatures": [
+        "Red, purple, or blue coloration",
+        "Well-circumscribed vascular appearance"
+      ],
+      "dermoscopicClues": [
+        "Red-blue lacunae",
+        "Homogeneous reddish areas"
+      ],
+      "demographics": {
+        "ageRange": "Broad age range",
+        "sexTendency": "No strong fixed bias",
+        "commonSites": [
+          "Trunk",
+          "Extremities"
+        ]
+      },
+      "examples": [],
+      "references": [
+        {
+          "id": "vasc-ref-1",
+          "label": "ISIC Archive - Vascular Lesions",
+          "url": "https://www.isic-archive.com"
+        }
+      ]
+    }
+  ]
+}

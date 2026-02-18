@@ -1,0 +1,6 @@
+experiment:
+  name: ablation_full
+  use_tta: true
+  wandb_project: skin-cancer-multimodal
+  notes: full ablation suite configuration
+

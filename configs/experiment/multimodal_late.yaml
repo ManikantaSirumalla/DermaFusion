@@ -1,0 +1,6 @@
+experiment:
+  name: multimodal_late
+  use_tta: false
+  wandb_project: skin-cancer-multimodal
+  notes: multimodal late fusion experiment
+
