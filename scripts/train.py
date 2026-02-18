@@ -6,6 +6,27 @@ from pathlib import Path
 import sys
 from typing import Any
 
+# Must run before any project imports so "src" is findable (Colab / different cwd)
+def _setup_path() -> Path:
+    import os as _os
+    root = _os.environ.get("DERMAFUSION_ROOT")
+    if root:
+        root = Path(root).resolve()
+    else:
+        root = Path(__file__).resolve().parents[1]
+    # Colab: if running from /content/DermaFusion, ensure it's on path (env var often not passed via !)
+    for candidate in (root, Path("/content/DermaFusion")):
+        if candidate.exists() and (candidate / "src").is_dir():
+            s = str(candidate)
+            if s not in sys.path:
+                sys.path.insert(0, s)
+            return candidate
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    return root
+
+PROJECT_ROOT = _setup_path()
+
 import numpy as np
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -14,20 +35,6 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from sklearn.model_selection import GroupShuffleSplit
-
-import os as _os
-
-# Colab/shell: set DERMAFUSION_ROOT to project root so "src" is found
-_project_root = _os.environ.get("DERMAFUSION_ROOT")
-if _project_root:
-    _project_root = Path(_project_root).resolve()
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    PROJECT_ROOT = _project_root
-else:
-    PROJECT_ROOT = Path(__file__).resolve().parents[1]
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.dataset import HAM10000Dataset
 from src.data.preprocessing import encode_metadata, compute_class_weights
