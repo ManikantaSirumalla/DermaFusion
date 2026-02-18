@@ -148,8 +148,10 @@ class HAM10000Dataset(Dataset):
         else:
             image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).float() / 255.0
 
+        # Use astype(float) + fillna to avoid pandas FutureWarning on object downcast
+        meta_series = row[self.metadata_columns]
         metadata_values = (
-            row[self.metadata_columns].fillna(0.0).to_numpy(dtype=np.float32, copy=True)
+            meta_series.astype(float, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32, copy=True)
         )
         metadata_tensor = torch.tensor(metadata_values, dtype=torch.float32)
         label = self._get_label(row)
