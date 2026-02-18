@@ -24,10 +24,10 @@ def get_train_transforms(
     transforms_list: list = []
     if apply_color_constancy:
         transforms_list.append(A.Lambda(image=shades_of_gray))
+    size_tuple = (image_size, image_size)
     transforms_list.extend([
         A.RandomResizedCrop(
-            image_size,
-            image_size,
+            size=size_tuple,
             scale=(0.8, 1.0),
             ratio=aspect_ratio,
         ),
@@ -77,7 +77,7 @@ def get_val_transforms(
     if apply_color_constancy:
         steps.append(A.Lambda(image=shades_of_gray))
     steps.extend([
-        A.Resize(image_size, image_size),
+        A.Resize(height=image_size, width=image_size),
         A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ToTensorV2(),
     ])
@@ -87,7 +87,7 @@ def get_val_transforms(
 def get_tta_transforms(image_size: int = 380) -> list[A.Compose]:
     """Return 8x TTA variants (guide: original + 4 rotations + 2 flips + 1 flip+rot)."""
     normalize_to_tensor = [
-        A.Resize(image_size, image_size),
+        A.Resize(height=image_size, width=image_size),
         A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ToTensorV2(),
     ]
