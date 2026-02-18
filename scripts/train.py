@@ -15,9 +15,19 @@ from torch import nn
 from torch.utils.data import DataLoader
 from sklearn.model_selection import GroupShuffleSplit
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+import os as _os
+
+# Colab/shell: set DERMAFUSION_ROOT to project root so "src" is found
+_project_root = _os.environ.get("DERMAFUSION_ROOT")
+if _project_root:
+    _project_root = Path(_project_root).resolve()
+    if str(_project_root) not in sys.path:
+        sys.path.insert(0, str(_project_root))
+    PROJECT_ROOT = _project_root
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.dataset import HAM10000Dataset
 from src.data.preprocessing import encode_metadata, compute_class_weights

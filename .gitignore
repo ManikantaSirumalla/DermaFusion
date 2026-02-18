@@ -1,6 +1,5 @@
 # Data and outputs (do not commit)
 data/
-Datasets/
 outputs/
 wandb/
 flagged/
