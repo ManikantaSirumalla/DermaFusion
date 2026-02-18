@@ -2,30 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
+
+# Colab: ensure project root is on path before any project imports (harmless if path missing locally)
+_COLAB_ROOT = "/content/DermaFusion"
+if _COLAB_ROOT not in sys.path:
+    sys.path.insert(0, _COLAB_ROOT)
+# Also add path from this file's location (for local runs)
+_this_dir = Path(__file__).resolve().parents[1]
+if str(_this_dir) not in sys.path:
+    sys.path.insert(0, str(_this_dir))
+PROJECT_ROOT = Path(_COLAB_ROOT) if Path(_COLAB_ROOT).exists() else _this_dir
+
 from typing import Any
-
-# Must run before any project imports so "src" is findable (Colab / different cwd)
-def _setup_path() -> Path:
-    import os as _os
-    root = _os.environ.get("DERMAFUSION_ROOT")
-    if root:
-        root = Path(root).resolve()
-    else:
-        root = Path(__file__).resolve().parents[1]
-    # Colab: if running from /content/DermaFusion, ensure it's on path (env var often not passed via !)
-    for candidate in (root, Path("/content/DermaFusion")):
-        if candidate.exists() and (candidate / "src").is_dir():
-            s = str(candidate)
-            if s not in sys.path:
-                sys.path.insert(0, s)
-            return candidate
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    return root
-
-PROJECT_ROOT = _setup_path()
 
 import numpy as np
 import hydra
