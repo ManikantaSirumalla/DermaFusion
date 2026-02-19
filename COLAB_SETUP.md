@@ -68,15 +68,57 @@ drive.mount("/content/drive")
 
 Adjust `DermaFusion_data` if your Drive folder name or path is different.
 
-**Option B – Upload from your computer**
+**Option B – Upload `derma_data.zip` from your computer**
 
-1. In Colab: **Files** (left sidebar) → **Upload to session storage**.
-2. Upload a zip of your `data` folder (or the metadata + images).
-3. Unzip into the project:
+1. In Colab: **Files** (left sidebar) → **Upload to session storage** → upload `derma_data.zip`.
+2. Run this in a cell (adjust the zip path if you used a different name/location):
 
 ```python
-# If you uploaded data.zip containing data/raw and data/preprocessed_hair_removed
-!unzip -o data.zip -d /content/DermaFusion/
+from pathlib import Path
+import zipfile
+
+repo = Path("/content/DermaFusion")
+zip_path = Path("/content/derma_data.zip")
+if not zip_path.exists():
+    zip_path = repo / "derma_data.zip"
+if not zip_path.exists():
+    raise FileNotFoundError("Upload derma_data.zip to /content/ or set zip_path.")
+
+with zipfile.ZipFile(zip_path, "r") as z:
+    names = z.namelist()
+# If zip has top-level "data/", extract into repo root
+if names and names[0].startswith("data/"):
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(repo)
+else:
+    # Zip has e.g. raw/ and preprocessed_hair_removed/ at top level
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall("/tmp/derma_extract")
+    (repo / "data").mkdir(parents=True, exist_ok=True)
+    import shutil
+    for name in ["raw", "preprocessed_hair_removed"]:
+        src = Path("/tmp/derma_extract") / name
+        if src.exists():
+            shutil.copytree(src, repo / "data" / name, dirs_exist_ok=True)
+    shutil.rmtree("/tmp/derma_extract", ignore_errors=True)
+
+# Verify
+meta = repo / "data" / "raw" / "metadata"
+train_img = repo / "data" / "preprocessed_hair_removed" / "images" / "train"
+val_img = repo / "data" / "preprocessed_hair_removed" / "images" / "val"
+print("metadata dir:", meta.exists(), list(meta.glob("*.csv"))[:5] if meta.exists() else [])
+print("train images:", train_img.exists(), len(list(train_img.glob("*.*"))) if train_img.exists() else 0)
+print("val images:", val_img.exists(), len(list(val_img.glob("*.*"))) if val_img.exists() else 0)
+```
+
+3. If your zip uses a different layout (e.g. `preprocessed/images` instead of `preprocessed_hair_removed/images`), either rename the folder inside `data/` to `preprocessed_hair_removed/images` or pass `data.data.preprocessed_image_dir=data/preprocessed/images` when training.
+
+**Option C – Upload a generic data zip**
+
+If you uploaded a zip named e.g. `data.zip` that already contains a top-level `data/` folder:
+
+```python
+!unzip -o /content/data.zip -d /content/DermaFusion/
 ```
 
 **Required metadata files (in `data/raw/metadata/`):**
@@ -88,6 +130,23 @@ Adjust `DermaFusion_data` if your Drive folder name or path is different.
 
 **Required images:**  
 `data/preprocessed_hair_removed/images/train/` and `.../val/` with `.jpg` files whose names match the `image_id` in the ground truth CSVs (e.g. `ISIC_xxxxx.jpg`).
+
+---
+
+## Step 4b: Run EDA (optional, before training)
+
+To explore class distribution, age/sex/localization, and sample images:
+
+1. In Colab: **File → Open notebook** → open `notebooks/01_eda.ipynb` from the repo (or upload it).
+2. Set the notebook’s working directory to the repo (e.g. first cell or **Runtime → Change runtime type** already with repo at `/content/DermaFusion`).
+3. Run all cells.
+
+The EDA notebook will use:
+
+- **Metadata:** `data/raw/metadata/metadata_merged.csv`, or `HAM10000_metadata.csv`, or it will build a table from `ISIC2018_Task3_Training_GroundTruth.csv` + `ISIC2018_Task3_Training_LesionGroupings.csv` if those are the only files present.
+- **Images:** `data/raw/images/train/` if it exists, otherwise `data/preprocessed_hair_removed/images/` (so it works with hair-removed data in Colab).
+
+If you opened the notebook from the repo, ensure the kernel’s cwd is `/content/DermaFusion` (e.g. run `%cd /content/DermaFusion` in a cell before the rest).
 
 ---
 
