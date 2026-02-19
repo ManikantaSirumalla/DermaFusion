@@ -133,20 +133,42 @@ If you uploaded a zip named e.g. `data.zip` that already contains a top-level `d
 
 ---
 
-## Step 4b: Run EDA (optional, before training)
+## Step 4b: Run EDA (recommended, before training)
 
-To explore class distribution, age/sex/localization, and sample images:
+Run exploratory data analysis to understand class balance, metadata quality, and image characteristics before training.
+
+### Opening the notebook
 
 1. In Colab: **File → Open notebook** → open `notebooks/01_eda.ipynb` from the repo (or upload it).
-2. Set the notebook’s working directory to the repo (e.g. first cell or **Runtime → Change runtime type** already with repo at `/content/DermaFusion`).
-3. Run all cells.
+2. Run `%cd /content/DermaFusion` as the very first cell to set the working directory. The notebook auto-detects Colab paths after this.
+3. Run all cells in order.
 
-The EDA notebook will use:
+### Data the notebook uses
 
 - **Metadata:** `data/raw/metadata/metadata_merged.csv`, or `HAM10000_metadata.csv`, or it will build a table from `ISIC2018_Task3_Training_GroundTruth.csv` + `ISIC2018_Task3_Training_LesionGroupings.csv` if those are the only files present.
 - **Images:** `data/raw/images/train/` if it exists, otherwise `data/preprocessed_hair_removed/images/` (so it works with hair-removed data in Colab).
 
-If you opened the notebook from the repo, ensure the kernel’s cwd is `/content/DermaFusion` (e.g. run `%cd /content/DermaFusion` in a cell before the rest).
+### What each analysis tells you
+
+| Analysis | What to look for |
+|----------|-----------------|
+| **Class distribution** bar chart | NV dominates (~67%); DF and VASC are ~1-2%. Confirms why focal loss and class-balanced sampling are needed. |
+| **Age by diagnosis** boxplot | Whether certain lesion types skew older/younger. Melanoma typically trends older. |
+| **Sex by diagnosis** stacked bar | Gender split per class. Check for demographic bias. |
+| **Localization heatmap** | Which body sites associate with which diagnoses (e.g. trunk for NV). |
+| **Images-per-lesion** histogram | How many duplicate-lesion images exist. Important for understanding why lesion-group-safe splits matter. |
+| **Missing values** bar chart | Which metadata columns have gaps. High missingness in `age` affects multimodal fusion viability. |
+| **Metadata correlation** heatmap | Relationships between numeric features (age, sex index, localization index). |
+| **Image dimensions & pixel variance** | Whether images are uniform size after preprocessing. Very low variance may indicate blank/corrupt images. |
+| **3x7 sample image grid** | Visual sanity check — confirms all 7 classes render correctly and preprocessing looks right. |
+
+### Key things to verify
+
+- **Class imbalance magnitude**: Note the exact counts and percentages. This informs whether you need to adjust class weights or sampling.
+- **Missing metadata %**: If age/sex/localization have high missingness, image-only baseline may outperform multimodal fusion.
+- **Lesion duplicates**: The images-per-lesion histogram shows why naive random splits would leak data. Confirm you understand the grouping.
+- **Preprocessing quality**: Compare sample images against raw images (change `IMAGE_DIR` to `data/raw/images/` and re-run the grid cell) to visually confirm hair removal worked.
+- **No runtime errors**: All cells should complete without errors. If a cell fails on missing files, double-check Step 4 data paths.
 
 ---
 
