@@ -23,10 +23,15 @@ __pycache__/
 *.mdc
 docs/
 IMPLEMENTATION_FLOW.md
-APP_STORE_CONNECT_SUBMISSION.md
-app_store_screenshot_captions.md
 project_documentation.md
 model_card.md
+
+# iOS app moved to the DermaFusion-App repo — ignore any lingering working copy
+DermFusion/
+legal/
+APP_STORE_LISTING.md
+APP_STORE_CONNECT_SUBMISSION.md
+app_store_screenshot_captions.md
 
 # IDE and OS
 .idea/

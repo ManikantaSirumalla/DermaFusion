@@ -1,1 +1,0 @@
-Body map SVG/assets go here.
