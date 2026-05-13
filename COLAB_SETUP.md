@@ -148,6 +148,16 @@ The EDA notebook will use:
 
 If you opened the notebook from the repo, ensure the kernel’s cwd is `/content/DermaFusion` (e.g. run `%cd /content/DermaFusion` in a cell before the rest).
 
+**Run `01_eda.ipynb` directly from code (execute the notebook file):**  
+Paste and run this in any Colab cell (after clone + data in place). This executes the EDA notebook and saves a version with all outputs; then open that file to see the plots.
+
+```python
+%cd /content/DermaFusion
+!pip install -q nbconvert
+!jupyter nbconvert --to notebook --execute notebooks/01_eda.ipynb --output 01_eda_executed.ipynb --ExecutePreprocessor.timeout=600
+print("Done. Open File → Open notebook → 01_eda_executed.ipynb to view results.")
+```
+
 ---
 
 ## Step 5: Check GPU and data
@@ -197,6 +207,27 @@ In a new cell:
 
 Let it run. You should see logs like “Using device: cuda”, class weights, then epoch 1, 2, …
 
+### High-accuracy retrain profile (recommended)
+
+If your goal is higher validation accuracy (especially MEL/AKIEC recall), run:
+
+```python
+!cd /content/DermaFusion && python scripts/train.py \
+  training=high_accuracy \
+  data.data.use_preprocessed=true \
+  data.data.preprocessed_image_dir=data/preprocessed_hair_removed/images \
+  data.data.sampler.balance_power=0.65 \
+  data.data.sampler.max_oversample_ratio=5 \
+  data.data.num_workers=2 \
+  data.data.validate_images_on_init=false
+```
+
+This uses:
+- `combined` loss (focal + label-smoothed CE),
+- stage-2 cost-sensitive fine-tuning,
+- hybrid checkpoint metric (`balanced_accuracy` + `macro_f1`),
+- softer oversampling to reduce minority-class overfit.
+
 ---
 
 ## Step 7: Save the checkpoint (optional)
@@ -220,6 +251,69 @@ else:
 
 ---
 
+## Step 8: Run post-training pipeline (bundle + validation + clinical gates)
+
+After training, run one command to:
+- export `dermafusion_bundle.pt` from `best.ckpt`
+- run threshold search on VAL
+- run final VAL/TEST validation with selected threshold
+- generate clinical readiness report
+- package artifacts into a zip
+
+```python
+!cd /content/DermaFusion && python run_colab_post_train.py \
+  --checkpoint outputs/checkpoints/best.ckpt \
+  --bundle-output outputs/export/dermafusion_bundle.pt \
+  --isic-dir Datasets/ISIC2018_Task3 \
+  --output-dir outputs/colab_post_training \
+  --candidate-thresholds 0.30,0.20,0.15,0.10,0.05,0.02 \
+  --target-mel-sensitivity 0.80 \
+  --target-mel-specificity 0.70 \
+  --target-mel-npv 0.97
+```
+
+If you only want to export the bundle (no validation/gates yet):
+
+```python
+!cd /content/DermaFusion && python run_colab_post_train.py \
+  --checkpoint outputs/checkpoints/best.ckpt \
+  --bundle-output outputs/export/dermafusion_bundle.pt \
+  --output-dir outputs/colab_post_training \
+  --skip-validation
+```
+
+Key outputs:
+- `outputs/export/dermafusion_bundle.pt`
+- `outputs/colab_post_training/pipeline_summary.json`
+- `outputs/colab_post_training/reports/clinical_readiness_*.md` and `.json`
+- `outputs/colab_post_training_artifacts.zip`
+
+### Runtime reset recovery (files saved in Drive)
+
+If your Colab runtime reset and your checkpoint/data are on Drive:
+
+```python
+from google.colab import drive
+drive.mount("/content/drive")
+%cd /content/DermaFusion
+
+!python run_colab_post_train.py \
+  --find-checkpoint-in-drive \
+  --find-isic-in-drive \
+  --drive-root /content/drive/MyDrive \
+  --output-dir outputs/colab_post_training \
+  --candidate-thresholds 0.30,0.20,0.15,0.10,0.05,0.02 \
+  --target-mel-sensitivity 0.80 \
+  --target-mel-specificity 0.70 \
+  --target-mel-npv 0.97
+```
+
+Notes:
+- By default, discovered Drive checkpoint is copied to `outputs/checkpoints/best.ckpt` before export.
+- If you want to use Drive checkpoint directly (no local copy), add `--no-localize-drive-checkpoint`.
+
+---
+
 ## Quick reference – all cells in order
 
 | Order | What to run |
@@ -230,5 +324,6 @@ else:
 | 4 | Check GPU + data paths (Step 5 code) |
 | 5 | Run `scripts/train.py` with the flags in Step 6 |
 | 6 | (Optional) Copy `best.ckpt` to Drive (Step 7) |
+| 7 | Run `run_colab_post_train.py` for bundle + validation + gate reports (Step 8) |
 
 If something fails, check: (1) Runtime is GPU, (2) `data/raw/metadata/` has the four CSVs, (3) `data/preprocessed_hair_removed/images/train/` and `val/` exist and contain the expected images.

@@ -1,213 +1,185 @@
 # DermaFusion
 
-Multi-modal deep learning for **skin lesion classification** (7 classes: melanoma, nevus, BCC, AKIEC, BKL, DF, vascular). This repository is the **ML side** — training & evaluation pipeline, datasets, notebooks, configs, and experiments.
+Multi-source deep learning for **8-class skin-lesion classification** (MEL, NV, BCC, AKIEC, BKL, DF, VASC, OTHER), trained on four public dermatology datasets and deployed as both a Gradio research demo and a native iOS app.
 
-> 📱 **The iOS app now lives in its own repo:** [ManikantaSirumalla/DermaFusion-App](https://github.com/ManikantaSirumalla/DermaFusion-App) (SwiftUI + Core ML, on-device inference).
-> The public legal pages are at [ManikantaSirumalla/DermaFusion-Legal](https://github.com/ManikantaSirumalla/DermaFusion-Legal).
+> 📱 **iOS app:** [ManikantaSirumalla/DermaFusion-App](https://github.com/ManikantaSirumalla/DermaFusion-App) (SwiftUI + Core ML, on-device inference).
+> ⚖️ **Public legal pages:** [ManikantaSirumalla/DermaFusion-Legal](https://github.com/ManikantaSirumalla/DermaFusion-Legal).
 
-## Features
+This repository is the **ML side**: training pipeline, Colab notebook, Gradio inference runtime, CoreML export, and the deployment artifacts shipped to the iOS app.
 
-- **7-class classification**: MEL, NV, BCC, AKIEC, BKL, DF, VASC (ISIC 2018 / HAM10000)
-- **Image-only baseline**: EfficientNet-B4 (timm) with Focal loss and class weighting
-- **Lesion-level splits**: No data leakage; train/val/test by `lesion_id`
-- **Preprocessing**: Optional hair removal (DullRazor) and color constancy (Shades of Gray)
-- **Config-driven**: Hydra configs for model, data, and training
-- **Colab-ready**: Notebook for GPU training with hair-removed images
+## Headline results
+
+Final E0 + E3 soft-vote ensemble (EfficientNet-B4 × 2, 380 × 380), TEST set n = 5,279, 1,000-iter bootstrap 95 % CI:
+
+| Metric | Value (95 % CI) |
+|---|---|
+| 8-class Balanced Accuracy | 0.540 [0.509, 0.568] |
+| 8-class Macro F1 | 0.469 [0.441, 0.495] |
+| Top-1 / Top-2 / Top-3 accuracy | 0.778 / 0.907 / 0.954 |
+| Binary-malignant AUROC | 0.830 |
+| Sensitivity @ 95 % specificity | 0.462 |
+
+Full table, per-class breakdown, and ISIC 2019 leaderboard comparison: [presentation/slides.md](presentation/slides.md) and `notebooks/DermaFusion_Personal _Final.ipynb` (Phase 15 + 20).
+
+## What's in this repo
+
+```
+DermaFusion/
+├── notebooks/
+│   └── DermaFusion_Personal _Final.ipynb   # The end-to-end training notebook (Colab)
+├── src/
+│   ├── data/         # Dataset, transforms (incl. Shades-of-Gray + DullRazor), sampler
+│   ├── models/       # timm-backed model factory + metadata fusion head
+│   ├── training/     # Trainer, CB-Focal loss, EMA/SAM, schedulers
+│   ├── evaluation/   # Metrics, calibration, GradCAM
+│   ├── deployment/   # ✦ Inference runtime + DermaFusionEnsemble class
+│   └── utils/
+├── scripts/          # train.py, evaluate.py, predict.py, validate_app_isic2018.py,
+│                     # clinical_readiness_report.py, export_bundle.py,
+│                     # export_ensemble_for_deployment.py, ...
+├── configs/          # Hydra: data, training, model
+├── demo/
+│   └── app.py        # Gradio research demo (bundle-first inference runtime)
+├── app/
+│   └── deployment_Bundle/
+│       ├── export_coreml.py        # Mac-side CoreML export script
+│       └── ensemble_config.json    # Ensemble weights + per-class thresholds
+├── presentation/
+│   └── slides.md     # 15-slide deck (Marp/reveal-md/slidev compatible)
+├── requirements.txt
+└── README.md
+```
+
+## Architecture summary
+
+| Stage | Description |
+|---|---|
+| **Data** | ISIC 2018 / 2019 / 2020 + PAD-UFES-20 → 61,694 dermoscopic + smartphone images, 8 unified classes |
+| **Splits** | Patient-grouped (`GroupShuffleSplit` on `patient_id → lesion_id`) + iterative leakage enforcement → TRAIN 52,483 / VAL 3,932 / TEST 5,279, **zero patient/lesion overlap** |
+| **Preprocessing** | Shades-of-Gray (power = 6) + DullRazor + 380 × 380 (cached as a 2.1 GB tarball on Drive) |
+| **Backbone** | EfficientNet-B4 (~17.6 M params) — two members trained from different starting points |
+| **E0** | `efficientnet_b4`, CB-Focal (γ = 1.5) + MixUp + TrivialAugmentWide + EMA 0.999, √-inv sampler |
+| **E3** | `tf_efficientnet_b4.ns_jft_in1k`, class-balanced focal (γ = 2.0), full-inverse sampler |
+| **Ensemble** | Soft-vote, Dirichlet-optimised weights `[0.705, 0.295]`, per-class thresholds tuned on VAL macro-F1 |
+| **Deployment** | Gradio (single 142 MB `dermafusion_ensemble.pt`) + iOS (two FP16 `.mlpackage` files, 34 MB each) |
 
 ## Setup
-
-**Requirements:** Python 3.10+, PyTorch 2.x, CUDA (optional, for GPU).
 
 ```bash
 git clone https://github.com/ManikantaSirumalla/DermaFusion.git
 cd DermaFusion
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Data
+**Python 3.10+**, PyTorch 2.1+, optionally CUDA for training. On Apple Silicon make sure `coremltools`, `rpds-py`, and `pydantic-core` are installed as native `arm64` wheels (force-reinstall if you previously had x86_64 wheels under Rosetta).
 
-- **Primary:** [ISIC 2018 Task 3](https://challenge.isic-archive.com/landing/2018/) (training/validation/test inputs + ground truth CSVs + lesion groupings).
-- **Raw ISIC 2018 location:** You can place the downloaded archive under `Datasets/ISIC2018_Task3/`. Expected layout:
-  - `Datasets/ISIC2018_Task3/ISIC2018_Task3_Training_Input/` (and Validation/Test) — images
-  - `Datasets/ISIC2018_Task3/ISIC2018_Task3_*_GroundTruth/` or `*.csv` at root — ground truth
-  - `Datasets/ISIC2018_Task3/ISIC2018_Task3_Training_LesionGroupings.csv`
-- **Canonical layout after setup:** Run `scripts/setup_data.py --raw-data-dir Datasets/ISIC2018_Task3 --output-dir data/raw` to get:
-  - `data/raw/images/{train,val,test}/` — dermoscopy images
-  - `data/raw/metadata/` — ISIC ground truth CSVs and lesion groupings (and optional merged metadata)
+## Deployment artifacts (large binaries are not in the repo)
 
-Optional: run preprocessing and hair removal, then train on preprocessed images:
+GitHub rejects files > 100 MB. The trained checkpoints, ensemble bundle, and CoreML packages live outside the repo. To run inference locally you need to obtain them and place them at one of the auto-discovered paths.
+
+| Artifact | Size | Where the runtime looks for it |
+|---|---|---|
+| `dermafusion_ensemble.pt` (Gradio) | ~142 MB | `app/deployment_Bundle/dermafusion_ensemble.pt` (preferred), or set `DERMAFUSION_BUNDLE=...` |
+| `E0.pt` / `E3.pt` (per-member ckpts) | ~71 MB each | `app/deployment_Bundle/` (only needed if regenerating CoreML packages) |
+| `E0.mlpackage` / `E3.mlpackage` | ~34 MB each | `app/deployment_Bundle/` (consumed by the iOS app via the [companion repo](https://github.com/ManikantaSirumalla/DermaFusion-App)) |
+
+Two ways to get them:
+
+1. **Train them yourself** in Colab via `notebooks/DermaFusion_Personal _Final.ipynb` (Phases 1 – 14). The notebook auto-archives `dermafusion_ensemble.pt` to Google Drive.
+2. **Download from a GitHub Release** of this repo when one is published.
+
+Once the `.pt` bundle is at `app/deployment_Bundle/dermafusion_ensemble.pt`, the Gradio runtime auto-detects it. To regenerate the CoreML packages from `E0.pt + E3.pt + dermafusion_ensemble.pt`:
 
 ```bash
-python scripts/preprocess_data.py --apply-hair-removal
-# Output: data/preprocessed_hair_removed/images/{train,val,test}/
+cd app/deployment_Bundle
+python export_coreml.py
+# → produces E0.mlpackage, E3.mlpackage, ensemble_config.json
 ```
 
-## Training
-
-**Local (CPU or GPU):**
+## Run the Gradio demo
 
 ```bash
-python scripts/train.py
+python -m demo.app
 ```
 
-Override config as needed:
+The runtime auto-discovers the bundle. On first request it cold-loads `DermaFusionEnsemble` (the pickled `nn.Module` shipped in the `.pt`); subsequent predictions reuse the warm model. UI shows top-K probabilities, GradCAM, and MEL triage decision.
+
+Override the bundle location:
 
 ```bash
-# Use hair-removed images and CPU (e.g. on Mac without MPS)
+DERMAFUSION_BUNDLE=/path/to/your/bundle.pt python -m demo.app
+```
+
+## Train from scratch (Colab recommended)
+
+The full pipeline lives in `notebooks/DermaFusion_Personal _Final.ipynb`. The notebook header documents a strict run order on a fresh kernel (Phase 0.1 → 9.5 → 9.6 → 14 → 15 → 16 → 20). One A100 / L4 takes ~96 min for E0 and ~6 h for E3.
+
+Local CLI training (single-model B4) is still supported:
+
+```bash
+# Smoke test
+python scripts/train.py training.training.epochs=2
+
+# Full run with hair-removed images on CPU
 python scripts/train.py data.data.use_preprocessed=true \
   data.data.preprocessed_image_dir=data/preprocessed_hair_removed/images \
   training.training.device=cpu
-
-# Short run (2 epochs)
-python scripts/train.py training.training.epochs=2
 ```
 
-**Google Colab (GPU):** Use the notebook `notebooks/Colab_Train_HairRemoved.ipynb`: mount Drive or clone this repo, install deps, then run training with `use_preprocessed=true` and hair-removed image paths.
-
-## Evaluation
-
-After training, the best checkpoint is saved under `outputs/checkpoints/best.ckpt`. Run evaluation:
+After training, evaluate and (optionally) export a deployment bundle:
 
 ```bash
 python scripts/evaluate.py
-```
-
-Reports (JSON/Markdown) are written to `outputs/`.
-
-### Bundle Validation (Colab-Friendly)
-
-If you trained in Colab and only have `dermafusion_bundle.pt`, run full-split validation directly from the bundle:
-
-```bash
-# Full validation split with dermoscopy preprocessing (Shades of Gray)
-python scripts/validate_app_isic2018.py \
-  --bundle dermafusion_bundle.pt \
-  --split val \
-  --preprocess sog \
-  --full-split \
-  --out-dir outputs/validation_app_val_sog_fullclin
-```
-
-This writes:
-- `validation_report.csv` (per-image predictions)
-- `validation_summary.txt` (Top-k + per-class metrics + MEL triage sensitivity/specificity)
-- `validation_metrics.json` (machine-readable metrics + confusion matrix)
-
-### Clinical Readiness Gates
-
-Generate a pass/fail readiness report from validation metrics:
-
-```bash
-python scripts/clinical_readiness_report.py \
-  --val-metrics outputs/validation_app_val_sog_fullclin/validation_metrics.json \
-  --test-metrics outputs/validation_app_test_sog_fullclin/validation_metrics.json \
-  --out-dir outputs/reports \
-  --report-name clinical_readiness
-```
-
-Outputs:
-- `outputs/reports/clinical_readiness.md`
-- `outputs/reports/clinical_readiness.json`
-
-Default gate profile (`screening_v1`) checks:
-- sample size
-- top-1 accuracy, balanced accuracy, macro-F1
-- melanoma triage sensitivity/specificity/NPV
-- class recall for MEL, BCC, AKIEC
-
-## Deployment Sync (Colab <-> Repo)
-
-To keep Colab artifacts and repo inference in sync, use a shared bundle:
-
-1. Place/export bundle at `outputs/export/dermafusion_bundle.pt`
-2. Use shared runtime via:
-   - CLI: `python scripts/predict.py --image path/to/image.jpg`
-   - Gradio: `python app/gradio_demo.py`
-
-Bundle-first loading is automatic. Fallback is `outputs/checkpoints/best.ckpt`.
-Auto-discovered bundle paths include:
-- `demo/dermafusion_new_V2/final_t020/dermafusion_bundle.pt`
-- `demo/dermafusion_new_V2/export_v2/dermafusion_bundle_t020.pt`
-- `demo/dermafusion_new_V2/export_v2/dermafusion_bundle.pt`
-- latest `demo/dermafusion_new_V2/run_*/dermafusion_bundle.pt`
-- `outputs/export/dermafusion_bundle.pt`
-- `dermafusion_bundle.pt` (project root)
-- `dermaduaion_bundle.pt` (backward-compatible typo fallback)
-
-### Export Bundle From Checkpoint
-
-```bash
 python scripts/export_bundle.py \
   --checkpoint outputs/checkpoints/best.ckpt \
   --output outputs/export/dermafusion_bundle.pt \
   --mel-threshold 0.30
 ```
 
-### Final Report + Model Card
+## Bundle validation + clinical readiness gates
+
+Run full-split validation against a `.pt` bundle (Colab-friendly — no Hydra config required):
 
 ```bash
-python scripts/final_report.py
+python scripts/validate_app_isic2018.py \
+  --bundle app/deployment_Bundle/dermafusion_ensemble.pt \
+  --split val --preprocess sog --full-split \
+  --out-dir outputs/validation
 ```
 
-Generates:
-- `outputs/reports/final_report.md`
-- `outputs/reports/model_card.md`
-- `outputs/reports/final_report.json`
-
-### Optional Bundle/Checkpoint Parity Check
+Then turn the JSON output into a pass/fail readiness report:
 
 ```bash
-python scripts/check_bundle_parity.py --image-dir data/preprocessed/images/val --samples 32
+python scripts/clinical_readiness_report.py \
+  --val-metrics  outputs/validation/validation_metrics.json \
+  --test-metrics outputs/validation_test/validation_metrics.json \
+  --out-dir outputs/reports --report-name clinical_readiness
 ```
 
-## Project layout
+The default `screening_v1` profile checks sample size, top-1 / balanced accuracy / macro-F1, MEL triage sensitivity / specificity / NPV, and class recall for MEL / BCC / AKIEC.
 
-```
-DermaFusion/
-├── configs/           # Hydra: model, training, data, experiment
-├── scripts/           # train.py, evaluate.py, preprocess_data.py, setup_data.py
-├── src/
-│   ├── data/          # Dataset, transforms, preprocessing, sampler
-│   ├── models/        # Model factory, image-only and fusion architectures
-│   ├── training/      # Trainer, losses, optimizer, schedulers, callbacks
-│   ├── evaluation/    # Metrics, calibration, confidence intervals
-│   └── utils/         # Logging, config, reproducibility
-├── notebooks/         # EDA, baseline, Colab training
-├── tests/
-├── DermFusion/        # iOS app (Swift)
-├── requirements.txt
-└── README.md
+## Presentation
+
+A 15-slide overview deck lives at [presentation/slides.md](presentation/slides.md). Render with:
+
+```bash
+marp presentation/slides.md -o slides.pdf          # PDF
+npx reveal-md presentation/slides.md               # HTML (reveal.js)
+npx slidev presentation/slides.md                  # Slidev
 ```
 
-## iOS app (DermFusion)
+## References
 
-The `DermFusion/` directory contains the Swift/Xcode project for on-device inference. Export the trained model (e.g. Core ML or ONNX) and integrate it into the app for camera-based skin lesion screening.
+- ISIC 2018 Task 3 — https://challenge.isic-archive.com/landing/2018/
+- ISIC 2019 — https://challenge.isic-archive.com/landing/2019/
+- HAM10000 — Tschandl et al., *Scientific Data* (2018)
+- PAD-UFES-20 — Pacheco et al., *Data in Brief* (2020)
+- Shades-of-Gray colour constancy — Finlayson & Trezzi (2004)
+- DullRazor hair removal — Lee et al. (1997)
+- Class-balanced focal loss — Cui et al., *CVPR* (2019)
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-## Pushing to GitHub
-
-From the project root:
-
-```bash
-git init
-git add .
-git commit -m "Add DermaFusion training pipeline, configs, and Colab notebook"
-git remote add origin https://github.com/ManikantaSirumalla/DermaFusion.git
-git branch -M main
-git push -u origin main
-```
-
-If the remote already has commits (e.g. initial README/LICENSE), either:
-
-- **Overwrite:** `git push -u origin main --force`
-- **Merge:** `git pull origin main --allow-unrelated-histories` then resolve any conflicts and `git push -u origin main`
-
-## Reference
-
-- ISIC 2018 Task 3: [Description](https://challenge.isic-archive.com/landing/2018/)
-- HAM10000: Tschandl et al., *Scientific Data* (2018)
+MIT — see [LICENSE](LICENSE).

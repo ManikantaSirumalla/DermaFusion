@@ -36,6 +36,51 @@ CLASS_TO_IDX = {name: idx for idx, name in enumerate(CLASS_ORDER)}
 GT_CLASS_COLS = ["MEL", "NV", "BCC", "AKIEC", "BKL", "DF", "VASC"]
 
 
+def _selection_score_from_metrics(metrics: dict[str, Any], cfg: DictConfig) -> float | None:
+    """Compute the training selection score from checkpoint metrics if possible."""
+    if not metrics:
+        return None
+
+    selection_metric = str(
+        OmegaConf.select(cfg, "training.training.selection_metric", default="balanced_accuracy")
+    ).lower()
+    if selection_metric in {"val_score", "custom", "selection_score"}:
+        bal = float(metrics.get("balanced_accuracy", 0.0))
+        f1 = float(metrics.get("macro_f1", 0.0))
+        min_recall = float(metrics.get("min_recall", 0.0))
+        bal_w = float(
+            OmegaConf.select(cfg, "training.training.selection_metric_weights.balanced_accuracy", 0.7)
+        )
+        f1_w = float(
+            OmegaConf.select(cfg, "training.training.selection_metric_weights.macro_f1", 0.3)
+        )
+        min_recall_w = float(
+            OmegaConf.select(cfg, "training.training.selection_metric_weights.min_recall", 0.0)
+        )
+        return bal * bal_w + f1 * f1_w + min_recall * min_recall_w
+
+    if selection_metric == "hybrid":
+        bal = float(metrics.get("balanced_accuracy", 0.0))
+        f1 = float(metrics.get("macro_f1", 0.0))
+        bal_w = float(
+            OmegaConf.select(cfg, "training.training.selection_metric_weights.balanced_accuracy", 0.7)
+        )
+        f1_w = float(
+            OmegaConf.select(cfg, "training.training.selection_metric_weights.macro_f1", 0.3)
+        )
+        return bal * bal_w + f1 * f1_w
+
+    if selection_metric == "min_recall":
+        return float(metrics.get("min_recall", 0.0))
+
+    if selection_metric == "balanced_accuracy":
+        return float(metrics.get("balanced_accuracy", 0.0))
+
+    if selection_metric == "macro_f1":
+        return float(metrics.get("macro_f1", 0.0))
+    return None
+
+
 def _resolve_path(path_value: str) -> Path:
     """Resolve config path to absolute project path."""
     path = Path(path_value)
@@ -239,12 +284,19 @@ def _write_markdown_report(
     checkpoint_path: Path,
     data_summary: dict[str, dict[str, Any]],
     metric_summary: dict[str, dict[str, Any]],
+    checkpoint_metrics: dict[str, Any],
 ) -> None:
     """Write human-readable markdown report for train/val/test and evaluation metrics."""
     lines: list[str] = []
     lines.append("# Model Training and Evaluation Report")
     lines.append("")
     lines.append(f"- Checkpoint: `{checkpoint_path}`")
+    if checkpoint_metrics.get("selection_score") is not None:
+        lines.append(f"- Checkpoint selection score: `{checkpoint_metrics['selection_score']:.6f}`")
+    if checkpoint_metrics.get("selection_metric") is not None:
+        lines.append(f"- Selection metric: `{checkpoint_metrics['selection_metric']}`")
+    if checkpoint_metrics.get("epoch") is not None:
+        lines.append(f"- Selected epoch: `{int(checkpoint_metrics['epoch']) + 1}`")
     lines.append("")
     lines.append("## Data Summary")
     lines.append("")
@@ -317,8 +369,19 @@ def main(cfg: DictConfig) -> None:
         state = payload.get("model_state", payload)
         model.load_state_dict(state, strict=False)
         logger.info("Loaded checkpoint: %s", checkpoint_path)
+        checkpoint_metrics = dict(payload.get("metrics", {}))
+        checkpoint_metrics["epoch"] = payload.get("epoch", payload.get("trainer_epoch", None))
+        checkpoint_metrics["selection_metric"] = str(
+            OmegaConf.select(cfg, "training.training.selection_metric", default="balanced_accuracy")
+        ).lower()
+        if "selection_score" not in checkpoint_metrics:
+            checkpoint_metrics["selection_score"] = _selection_score_from_metrics(
+                checkpoint_metrics, cfg
+            )
     else:
         logger.warning("Checkpoint not found at %s; using current model weights.", checkpoint_path)
+        payload = {}
+        checkpoint_metrics = {}
 
     loaders, data_summary = _build_data(cfg)
     metric_summary: dict[str, dict[str, Any]] = {}
@@ -353,6 +416,7 @@ def main(cfg: DictConfig) -> None:
         "checkpoint": str(checkpoint_path),
         "data_summary": data_summary,
         "metrics": metric_summary,
+        "checkpoint_metrics": checkpoint_metrics,
     }
     report_dir = PROJECT_ROOT / "outputs" / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -366,6 +430,7 @@ def main(cfg: DictConfig) -> None:
         checkpoint_path=checkpoint_path,
         data_summary=data_summary,
         metric_summary=metric_summary,
+        checkpoint_metrics=checkpoint_metrics,
     )
     logger.info("Wrote evaluation markdown report to %s", markdown_path)
 

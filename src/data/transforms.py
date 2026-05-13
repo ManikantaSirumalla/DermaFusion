@@ -24,10 +24,10 @@ def get_train_transforms(
     transforms_list: list = []
     if apply_color_constancy:
         transforms_list.append(A.Lambda(image=shades_of_gray))
-    size_tuple = (image_size, image_size)
     transforms_list.extend([
         A.RandomResizedCrop(
-            size=size_tuple,
+            height=image_size,
+            width=image_size,
             scale=(0.8, 1.0),
             ratio=aspect_ratio,
         ),

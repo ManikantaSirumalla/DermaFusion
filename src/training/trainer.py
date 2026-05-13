@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from sklearn.metrics import balanced_accuracy_score, f1_score
+from sklearn.metrics import balanced_accuracy_score, confusion_matrix, f1_score
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -23,6 +23,7 @@ class TrainerState:
 
     epoch: int = 0
     best_metric: float = 0.0
+    best_epoch: int | None = None
 
 
 def _cfg_value(cfg: Any, path: str, default: Any) -> Any:
@@ -75,8 +76,34 @@ class Trainer:
         )
         self.max_epochs = int(_cfg_value(config, "training.training.epochs", 1))
         self.warmup_epochs = int(_cfg_value(config, "training.training.scheduler.warmup_epochs", 0))
+        self.stage2_start_ratio = float(_cfg_value(config, "training.training.loss.stage2_start_ratio", 0.7))
+        self.freeze_backbone_epochs = int(
+            _cfg_value(config, "training.training.freeze_backbone_epochs", 0)
+        )
+        self.selection_metric = str(
+            _cfg_value(config, "training.training.selection_metric", "balanced_accuracy")
+        ).lower()
+        self.hybrid_bal_weight = float(
+            _cfg_value(config, "training.training.selection_metric_weights.balanced_accuracy", 0.7)
+        )
+        self.hybrid_f1_weight = float(
+            _cfg_value(config, "training.training.selection_metric_weights.macro_f1", 0.3)
+        )
+        self.min_recall_weight = float(
+            _cfg_value(config, "training.training.selection_metric_weights.min_recall", 0.0)
+        )
+        self.num_classes = int(
+            _cfg_value(
+                config,
+                "model.model.num_classes",
+                _cfg_value(config, "model.num_classes", 7),
+            )
+        )
         self.use_mixed_precision = bool(_cfg_value(config, "training.training.mixed_precision", False))
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_mixed_precision and device.type == "cuda")
+        self._backbone_frozen = False
+        if self.freeze_backbone_epochs > 0:
+            self._set_backbone_trainable(False)
 
     def _move_batch_to_device(self, batch: dict[str, Any]) -> dict[str, Any]:
         """Move tensor items in batch dict to trainer device."""
@@ -89,10 +116,59 @@ class Trainer:
         """Compute balanced accuracy and macro-F1 for a mini-batch aggregate."""
         preds = torch.argmax(logits, dim=1).detach().cpu().numpy()
         true = labels.detach().cpu().numpy()
+
+        cm = confusion_matrix(
+            true,
+            preds,
+            labels=list(range(self.num_classes)),
+        )
+        min_recall = 1.0
+        for class_idx in range(self.num_classes):
+            tp = cm[class_idx, class_idx]
+            fn = cm[class_idx, :].sum() - tp
+            denom = tp + fn
+            recall = 1.0 if denom == 0 else float(tp / denom)
+            if recall < min_recall:
+                min_recall = recall
+
         return {
             "balanced_accuracy": float(balanced_accuracy_score(true, preds)),
             "macro_f1": float(f1_score(true, preds, average="macro")),
+            "min_recall": float(min_recall),
         }
+
+    def _set_backbone_trainable(self, trainable: bool) -> None:
+        """Toggle backbone trainability; optimizer param groups remain intact."""
+        changed = 0
+        for name, param in self.model.named_parameters():
+            if "image_encoder.backbone" not in name:
+                continue
+            if param.requires_grad != trainable:
+                param.requires_grad = trainable
+                changed += 1
+        self._backbone_frozen = not trainable
+        logging.getLogger("train").info(
+            "Backbone trainable=%s (updated %d params).",
+            trainable,
+            changed,
+        )
+
+    def _selection_score(self, val_metrics: dict[str, float]) -> float:
+        """Compute checkpoint/early-stop score from validation metrics."""
+        bal = float(val_metrics.get("balanced_accuracy", 0.0))
+        f1 = float(val_metrics.get("macro_f1", 0.0))
+        min_recall = float(val_metrics.get("min_recall", 0.0))
+        if self.selection_metric == "hybrid":
+            return self.hybrid_bal_weight * bal + self.hybrid_f1_weight * f1
+        if self.selection_metric in {"val_score", "custom", "selection_score"}:
+            return (
+                self.hybrid_bal_weight * bal
+                + self.hybrid_f1_weight * f1
+                + self.min_recall_weight * min_recall
+            )
+        if self.selection_metric == "min_recall":
+            return min_recall
+        return bal
 
     def train_epoch(self, epoch: int | None = None) -> dict[str, float]:
         """Run one training epoch and return aggregate metrics."""
@@ -106,7 +182,7 @@ class Trainer:
         if (
             self.stage2_loss_fn is not None
             and epoch is not None
-            and epoch >= max(self.warmup_epochs, int(self.max_epochs * 0.7))
+            and epoch >= max(self.warmup_epochs, int(self.max_epochs * self.stage2_start_ratio))
         ):
             active_loss = self.stage2_loss_fn
 
@@ -195,9 +271,13 @@ class Trainer:
 
     def fit(self) -> dict[str, float]:
         """Run full training loop with optional callbacks."""
-        best_val = float("-inf")
+        best_selection = float("-inf")
+        best_bal_acc = float("-inf")
+        best_selection_epoch = 1
         for epoch in range(self.max_epochs):
             self.state.epoch = epoch
+            if self.freeze_backbone_epochs > 0 and self._backbone_frozen and epoch >= self.freeze_backbone_epochs:
+                self._set_backbone_trainable(True)
             if epoch == 0:
                 logging.getLogger("train").info("Epoch 1/%d: loading first batch...", self.max_epochs)
             train_metrics = self.train_epoch(epoch=epoch)
@@ -208,10 +288,17 @@ class Trainer:
 
             self._log_epoch(epoch, train_metrics, val_metrics)
 
-            current_val = float(val_metrics.get("balanced_accuracy", 0.0))
-            if current_val > best_val:
-                best_val = current_val
-                self.state.best_metric = best_val
+            current_selection = self._selection_score(val_metrics)
+            current_bal_acc = float(val_metrics.get("balanced_accuracy", 0.0))
+            val_metrics["selection_score"] = current_selection
+
+            if current_selection > best_selection:
+                best_selection = current_selection
+                best_selection_epoch = epoch + 1
+                self.state.best_metric = best_selection
+
+            if current_bal_acc > best_bal_acc:
+                best_bal_acc = current_bal_acc
 
             if self.checkpoint is not None:
                 self.checkpoint.save(
@@ -223,10 +310,17 @@ class Trainer:
                     config=self.config,
                 )
 
-            if self.early_stopping is not None and self.early_stopping.step(current_val):
+            if self.early_stopping is not None and self.early_stopping.step(current_selection):
                 break
 
-        return {"best_balanced_accuracy": self.state.best_metric, "epochs_ran": self.state.epoch + 1}
+        self.state.best_epoch = best_selection_epoch
+        return {
+            "best_balanced_accuracy": best_bal_acc,
+            "best_selection_score": self.state.best_metric,
+            "selection_metric": self.selection_metric,
+            "best_epoch": self.state.best_epoch,
+            "epochs_ran": self.state.epoch + 1,
+        }
 
     def run_sanity_check(self, iterations: int = 50) -> tuple[float, float]:
         """Overfit one batch; useful to quickly validate optimization path."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import logging
 
 import torch
 
@@ -61,6 +62,14 @@ class ModelCheckpoint:
         config: Any | None = None,
     ) -> None:
         """Save latest checkpoint and best checkpoint if improved."""
+        metric = float(metrics.get(self.monitor, float("-inf") if self.mode == "max" else float("inf")))
+        if self.monitor not in metrics:
+            logging.getLogger("train").warning(
+                "Checkpoint monitor '%s' not present in metrics; using fallback=%f",
+                self.monitor,
+                metric,
+            )
+
         payload = {
             "epoch": epoch,
             "model_state": model.state_dict(),
@@ -70,8 +79,6 @@ class ModelCheckpoint:
             "config": config,
         }
         torch.save(payload, self.save_dir / "last.ckpt")
-
-        metric = float(metrics.get(self.monitor, 0.0))
         if self._is_better(metric):
             self.best_metric = metric
             torch.save(payload, self.save_dir / "best.ckpt")

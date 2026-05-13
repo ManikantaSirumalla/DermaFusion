@@ -17,4 +17,5 @@ torchmetrics==1.2.0
 pillow==10.0.0
 tqdm==4.66.0
 opencv-python-headless==4.8.1.78
+jupyter>=1.0.0
 

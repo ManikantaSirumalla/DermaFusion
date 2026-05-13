@@ -16,4 +16,6 @@ data:
   preprocessed_image_dir: data/preprocessed/images
   # Set false to skip opening every image at startup (faster; use when data is trusted)
   validate_images_on_init: false
-
+  sampler:
+    balance_power: 1.0
+    max_oversample_ratio: null

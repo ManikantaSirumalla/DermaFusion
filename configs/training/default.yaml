@@ -5,10 +5,24 @@ training:
   batch_size: 32
   epochs: 100
   early_stopping_patience: 15
+  freeze_backbone_epochs: 0
   sanity_check: false  # set true to overfit 1 batch and verify pipeline
   mixed_precision: true
   gradient_clip_val: 1.0
   accumulate_grad_batches: 4  # effective batch 128 (guide: 32 x 4)
+  # Options:
+  # - balanced_accuracy
+  # - hybrid
+  # - val_score  (alias: custom, selection_score)
+  # - min_recall
+  # Keep this in sync with your target score definition.
+  selection_metric: val_score
+  selection_metric_weights:
+    balanced_accuracy: 0.7
+    macro_f1: 0.3
+    min_recall: 0.0
+  # Explicitly control checkpoint monitor metric if needed.
+  checkpoint_monitor: val_score
   optimizer:
     name: adamw
     lr: 0.0001   # backbone (guide: 1e-4)
@@ -23,6 +37,11 @@ training:
     name: focal
     gamma: 2.0
     alpha: class_frequency_inverse
+    use_stage2: true
+    stage2_start_ratio: 0.7
+    label_smoothing: 0.1
+    focal_weight: 0.7
+    ce_weight: 0.3
     melanoma_fn_weight: 10  # guide: melanoma FN = 10x cost
     bcc_fn_weight: 5        # guide: BCC FN = 5x cost
-
+    akiec_fn_weight: 3      # elevate AKIEC recall (hard class)

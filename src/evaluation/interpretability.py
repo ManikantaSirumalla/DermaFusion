@@ -21,18 +21,37 @@ def generate_gradcam(
     image: torch.Tensor,
     target_class: int,
     layer: torch.nn.Module | None = None,
+    metadata: torch.Tensor | None = None,
 ) -> np.ndarray:
     """Generate a simple GradCAM-like heatmap."""
     _ = layer
     model.eval()
     image = image.unsqueeze(0).clone().detach().requires_grad_(True)
-    logits = model({"image": image}) if isinstance(image, torch.Tensor) else model(image)
+    if metadata is not None and metadata.ndim == 1:
+        metadata = metadata.unsqueeze(0)
+    logits = _forward_model(model=model, image=image, metadata=metadata)
     score = logits[0, target_class]
     score.backward()
     grad = image.grad.detach().abs().mean(dim=1).squeeze(0)
     heatmap = grad.cpu().numpy()
     heatmap = heatmap / (heatmap.max() + 1e-12)
     return heatmap
+
+
+def _forward_model(
+    model: torch.nn.Module,
+    image: torch.Tensor,
+    metadata: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Forward helper that supports dict-input and tensor-input models."""
+    if metadata is not None:
+        batch = {"image": image, "metadata": metadata.to(image.device)}
+    else:
+        batch = {"image": image}
+    try:
+        return model(batch)  # type: ignore[arg-type]
+    except Exception:
+        return model(image)  # type: ignore[arg-type]
 
 
 def attention_rollout(model: torch.nn.Module, image: torch.Tensor) -> np.ndarray:

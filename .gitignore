@@ -17,6 +17,22 @@ __pycache__/
 .env
 *.ckpt
 *.pth
+*.pt
+*.mlpackage
+*.mlpackage/
+*.mlmodel
+*.mlmodelc
+*_mlpackage.zip
+
+# Raw + cached datasets (download manually, see README)
+Datasets/
+notebooks/data/
+
+# Historical run artefacts (large; not needed to reproduce)
+demo/dermafusion_new_V2/
+trace.log
+app.log
+out.txt
 
 # Cursor rules and internal docs (keep README.md tracked)
 .cursor/

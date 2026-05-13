@@ -1,0 +1,37 @@
+training:
+  device: null
+  batch_size: 24
+  epochs: 50
+  early_stopping_patience: 10
+  freeze_backbone_epochs: 1
+  sanity_check: false
+  mixed_precision: true
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 2
+  selection_metric: val_score
+  selection_metric_weights:
+    balanced_accuracy: 0.65
+    macro_f1: 0.35
+    min_recall: 0.0
+  checkpoint_monitor: val_score
+  optimizer:
+    name: adamw
+    lr: 0.00003
+    head_lr: 0.0003
+    weight_decay: 0.0001
+  scheduler:
+    name: cosine_annealing_warmup
+    warmup_epochs: 3
+    min_lr: 0.000001
+  loss:
+    name: combined
+    gamma: 2.0
+    alpha: class_frequency_inverse
+    use_stage2: true
+    stage2_start_ratio: 0.55
+    label_smoothing: 0.1
+    focal_weight: 0.65
+    ce_weight: 0.35
+    melanoma_fn_weight: 12
+    bcc_fn_weight: 6
+    akiec_fn_weight: 4

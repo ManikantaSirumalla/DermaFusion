@@ -16,5 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 if __name__ == "__main__":
-    from demo.app import demo
-    demo.launch()
+    from demo.app import launch_demo
+
+    launch_demo()

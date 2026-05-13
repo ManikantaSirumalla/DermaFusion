@@ -32,7 +32,7 @@ from src.data.sampler import ClassBalancedSampler
 from src.data.transforms import get_train_transforms, get_val_transforms
 from src.models.model_factory import build_model
 from src.training.callbacks import EarlyStopping, ModelCheckpoint, WandBCallback
-from src.training.losses import CostSensitiveLoss, FocalLoss
+from src.training.losses import CombinedLoss, CostSensitiveLoss, FocalLoss
 from src.training.optimizer import build_optimizer
 from src.training.schedulers import CosineAnnealingWithWarmup
 from src.training.trainer import Trainer
@@ -128,12 +128,45 @@ def _build_loss_functions(
     When class_weights is provided and config requests it, Focal loss uses
     inverse-frequency weights to address class imbalance.
     """
+    loss_name = str(OmegaConf.select(cfg, "training.training.loss.name", default="focal")).lower()
     gamma = float(OmegaConf.select(cfg, "training.training.loss.gamma", default=2.0))
     use_alpha = str(
         OmegaConf.select(cfg, "training.training.loss.alpha", default="none")
     ).lower() == "class_frequency_inverse"
     alpha = class_weights if (use_alpha and class_weights is not None) else None
-    stage1 = FocalLoss(alpha=alpha, gamma=gamma)
+    if loss_name == "combined":
+        stage1 = CombinedLoss(
+            focal_weight=float(OmegaConf.select(cfg, "training.training.loss.focal_weight", default=0.7)),
+            ce_weight=float(OmegaConf.select(cfg, "training.training.loss.ce_weight", default=0.3)),
+            alpha=alpha,
+            gamma=gamma,
+            label_smoothing=float(
+                OmegaConf.select(cfg, "training.training.loss.label_smoothing", default=0.1)
+            ),
+        )
+    elif loss_name == "cost_sensitive":
+        stage1 = CostSensitiveLoss(
+            cost_matrix={
+                "mel": {
+                    "fn_weight": float(
+                        OmegaConf.select(cfg, "training.training.loss.melanoma_fn_weight", default=10.0)
+                    )
+                },
+                "bcc": {
+                    "fn_weight": float(
+                        OmegaConf.select(cfg, "training.training.loss.bcc_fn_weight", default=5.0)
+                    )
+                },
+                "akiec": {
+                    "fn_weight": float(
+                        OmegaConf.select(cfg, "training.training.loss.akiec_fn_weight", default=3.0)
+                    )
+                },
+                "default": {"fn_weight": 1.0},
+            }
+        )
+    else:
+        stage1 = FocalLoss(alpha=alpha, gamma=gamma)
 
     mel_weight = float(
         OmegaConf.select(cfg, "training.training.loss.melanoma_fn_weight", default=10.0)
@@ -141,13 +174,19 @@ def _build_loss_functions(
     bcc_weight = float(
         OmegaConf.select(cfg, "training.training.loss.bcc_fn_weight", default=5.0)
     )
+    akiec_weight = float(
+        OmegaConf.select(cfg, "training.training.loss.akiec_fn_weight", default=3.0)
+    )
     stage2 = CostSensitiveLoss(
         cost_matrix={
             "mel": {"fn_weight": mel_weight},
             "bcc": {"fn_weight": bcc_weight},
+            "akiec": {"fn_weight": akiec_weight},
             "default": {"fn_weight": 1.0},
         }
     )
+    if not bool(OmegaConf.select(cfg, "training.training.loss.use_stage2", default=True)):
+        stage2 = None
     return stage1, stage2
 
 
@@ -246,6 +285,8 @@ def _build_dataloaders(cfg: DictConfig, device: torch.device | None = None) -> t
         lesion_col="lesion_id",
         batch_size=batch_size,
         seed=int(_cfg_value(cfg, "seed", 42)),
+        balance_power=float(_cfg_value(cfg, "data.data.sampler.balance_power", 1.0)),
+        max_oversample_ratio=_cfg_value(cfg, "data.data.sampler.max_oversample_ratio", None),
     )
     train_loader = DataLoader(
         train_dataset,
@@ -287,6 +328,11 @@ def main(cfg: DictConfig) -> None:
         "Class weights (inverse freq): %s",
         [f"{class_weights[i].item():.3f}" for i in range(7)],
     )
+    logger.info(
+        "Sampler settings: balance_power=%.2f max_oversample_ratio=%s",
+        float(_cfg_value(cfg, "data.data.sampler.balance_power", 1.0)),
+        str(_cfg_value(cfg, "data.data.sampler.max_oversample_ratio", None)),
+    )
 
     model = build_model(cfg)
     stage1_loss, stage2_loss = _build_loss_functions(cfg, class_weights=class_weights)
@@ -314,7 +360,17 @@ def main(cfg: DictConfig) -> None:
         patience=int(OmegaConf.select(cfg, "training.training.early_stopping_patience", default=15)),
         mode="max",
     )
-    checkpoint = ModelCheckpoint(save_dir=PROJECT_ROOT / "outputs/checkpoints")
+    selection_metric = str(_cfg_value(cfg, "training.training.selection_metric", "balanced_accuracy")).lower()
+    monitor_metric = str(
+        _cfg_value(cfg, "training.training.checkpoint_monitor", selection_metric)
+    ).lower()
+    if monitor_metric in {"val_score", "custom", "selection_score"}:
+        monitor_metric = "selection_score"
+    checkpoint = ModelCheckpoint(
+        save_dir=PROJECT_ROOT / "outputs/checkpoints",
+        monitor=monitor_metric,
+        mode="max",
+    )
 
     trainer = Trainer(
         model=model,
